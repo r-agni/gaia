@@ -1,15 +1,11 @@
-# Single-stage Dockerfile for HF Spaces
-# Pre-built worldview/dist is committed to the repo — no Vite build needed
 FROM node:20-bookworm-slim
 
-# HF Spaces requires uid 1000
 RUN useradd -m -u 1000 user
 
 RUN apt-get update && apt-get install -y --no-install-recommends     python3 python3-pip python3-venv     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/user/app
 
-# GeoGuess env (Python FastAPI)
 COPY --chown=user geoguess_env/pyproject.toml /home/user/app/geoguess_env/
 COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
 COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
@@ -17,12 +13,13 @@ COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
-# Worldview — pre-built dist from repo (no Vite build step)
 COPY --chown=user worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
 COPY --chown=user worldview/package.json /home/user/app/worldview/package.json
-# Use npm install instead of npm ci to avoid lockfile version mismatch
-RUN cd /home/user/app/worldview && npm install --omit=dev --no-audit --no-fund
+
+# Explicitly print npm version and try install with verbose output to see the error
+RUN node --version && npm --version
+RUN cd /home/user/app/worldview && npm install --omit=dev --no-audit --no-fund 2>&1 || (echo "NPM INSTALL FAILED" && cat npm-debug.log 2>/dev/null && exit 1)
 
 COPY --chown=user scripts/start.sh /home/user/app/start.sh
 RUN chmod +x /home/user/app/start.sh
