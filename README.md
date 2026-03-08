@@ -18,6 +18,20 @@ This repo includes:
 - `geoguess_env/`: OpenEnv environment server, engine, tool providers, agents, and GRPO training script.
 - `worldview/`: real-time Cesium-based visualization and control UI.
 
+## Live Deployment Links
+
+- Public demo (Northflank, UI + backend proxy):  
+  https://http--gaia-app--bhzgzs6hgvmy.code.run/
+- Public WebSocket stream (proxied live state):  
+  wss://http--gaia-app--bhzgzs6hgvmy.code.run/ws/geoguess
+- Public REST examples (via Node proxy):
+  - `GET /api/geoguess/state`
+  - `POST /api/geoguess/run_game`
+  - `POST /api/geoguess/auto_play/start`
+  - `POST /api/geoguess/auto_play/stop`
+  - `GET /api/geoguess/auto_play/status`
+  - `GET /api/geoguess/training/history`
+
 ---
 
 ## 1. Hackathon Alignment
@@ -37,6 +51,29 @@ Why this fits:
 Why these two:
 - Fleet AI: first-class oversight pipeline (`oversight_flags`, `oversight_summary`) is implemented and streamed live.
 - Scaler AI Labs: the environment matches Statement 3.1 world-modeling behavior with tool/API interaction, business-rule-like constraints (budgeted actions), and multi-step workflow execution.
+
+### Subcategory Fit (Concrete Mapping)
+
+**Fleet AI - Scalable Oversight**
+- Dedicated oversight agent evaluates each guess and emits structured flags:
+  `LAZY_GUESS`, `CONTRADICTION`, `REPEATED_GUESS`, `THIN_REASONING`, `OVERCONFIDENT`.
+- Episode-level reliability rollup is exposed as `oversight_summary` (`CLEAN` / `CAUTION` / `UNRELIABLE`).
+- Oversight is first-class in runtime outputs:
+  - Engine state includes `oversight_flags` and `oversight_summary`.
+  - Backend emits real-time `oversight_flag` WebSocket events.
+  - UI surfaces flag panels and reliability status.
+- Why this fits Fleet AI: the system does not only act; it monitors, explains, and scores agent reliability as a parallel oversight process.
+
+**Scaler AI Labs - Multi-App RL Environment for Enterprise Workflows**
+- Multi-step workflow under hard budgets:
+  agent must sequence tool calls, update beliefs, and guess within step/guess limits.
+- Multi-tool app integration:
+  weather, terrain/elevation, sun-angle, language, building-style, and map imagery tools are composed in one episode loop.
+- Standardized environment contract:
+  OpenEnv reset/step/state/schema + WS interface supports reproducible policy evaluation and training.
+- Deployment-friendly operations:
+  same backend contracts power local dev, containerized demo, and hosted runtime (Northflank / HF Spaces path).
+- Why this fits Scaler AI Labs: this is a reusable, enterprise-style RL environment with explicit workflows, guardrails, monitoring signals, and transport-stable APIs.
 
 ### Secondary Technical Alignment
 **Statement 3.1: World Modeling (Professional Tasks)**  
