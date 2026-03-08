@@ -6,9 +6,15 @@ APP_ROOT="$(cd "$(dirname "$0")" && pwd)"
 TRAINING_STATUS_FILE="${TRAINING_STATUS_FILE:-/tmp/gaia_training_status.json}"
 TRAINING_LOG_FILE="${TRAINING_LOG_FILE:-/tmp/gaia_train_grpo.log}"
 VLLM_LOG_FILE="${VLLM_LOG_FILE:-/tmp/gaia_vllm.log}"
-VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-240}"
+VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-360}"
 VLLM_HEALTH_SLEEP_SEC="${VLLM_HEALTH_SLEEP_SEC:-5}"
 ALLOW_TRAINING_FALLBACK_NO_VLLM="${ALLOW_TRAINING_FALLBACK_NO_VLLM:-true}"
+
+vllm_ready() {
+  wget -q -O /dev/null http://127.0.0.1:8000/health 2>/dev/null && return 0
+  wget -q -O /dev/null http://127.0.0.1:8000/v1/models 2>/dev/null && return 0
+  return 1
+}
 
 write_training_status() {
   state="$1"
@@ -47,7 +53,7 @@ fi
 # Optional: auto-run GRPO training (requires INSTALL_TRAINING=true at build, RUN_GRPO_TRAINING=true at runtime, and GPU)
 if [ "$RUN_GRPO_TRAINING" = "true" ]; then
   write_training_status "initializing" "RUN_GRPO_TRAINING=true; waiting for env and dependencies."
-  if python3 -c "import trl" 2>/dev/null && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
+  if python3 -c "import trl, vllm" 2>/dev/null && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
     (
       set +e
       export BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
@@ -60,13 +66,13 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       python3 -m vllm.entrypoints.openai.api_server --model "$BASE_MODEL" --host 0.0.0.0 --port 8000 >"$VLLM_LOG_FILE" 2>&1 &
       VLLM_PID=$!
       VLLM_READY=false
-      write_training_status "waiting_for_vllm" "Waiting for vLLM health endpoint."
+      write_training_status "waiting_for_vllm" "Waiting for vLLM readiness endpoint."
       for i in $(seq 1 "$VLLM_HEALTH_RETRIES"); do
         if ! kill -0 "$VLLM_PID" 2>/dev/null; then
           write_training_status "failed" "vLLM process exited before becoming healthy (see vLLM log)."
           break
         fi
-        if wget -q -O /dev/null http://127.0.0.1:8000/health 2>/dev/null; then
+        if vllm_ready; then
           VLLM_READY=true
           write_training_status "running_trainer" "vLLM is healthy; starting train_grpo.py."
           cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 train_grpo.py >>"$TRAINING_LOG_FILE" 2>&1
@@ -97,8 +103,8 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       fi
       kill "$VLLM_PID" 2>/dev/null || true
     ) &
-  elif ! python3 -c "import trl" 2>/dev/null; then
-    write_training_status "skipped" "Training deps missing (trl not installed). Rebuild with INSTALL_TRAINING=true."
+  elif ! python3 -c "import trl, vllm" 2>/dev/null; then
+    write_training_status "skipped" "Training deps missing (trl/vllm not installed). Rebuild with INSTALL_TRAINING=true."
   else
     write_training_status "skipped" "Dataset missing at geoguess_env/data/training_1k.jsonl."
   fi
