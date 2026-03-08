@@ -37,7 +37,9 @@ COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/
 RUN cd /home/user/app/worldview && npm ci --omit=dev
 
 COPY --chown=user scripts/start.sh /home/user/app/start.sh
-RUN chmod +x /home/user/app/start.sh
+RUN sed -i '1s/^\xEF\xBB\xBF//' /home/user/app/start.sh \
+    && sed -i 's/\r$//' /home/user/app/start.sh \
+    && chmod +x /home/user/app/start.sh
 
 ENV NODE_ENV=production
 ENV PORT=3001

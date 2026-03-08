@@ -25,14 +25,16 @@ COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
-# Worldview — pre-built dist committed to repo (no Vite build needed)
+# Worldview ? pre-built dist committed to repo (no Vite build needed)
 COPY --chown=user worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
 COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/app/worldview/
 RUN cd /home/user/app/worldview && npm ci --omit=dev
 
 COPY --chown=user scripts/start.sh /home/user/app/start.sh
-RUN chmod +x /home/user/app/start.sh
+RUN sed -i '1s/^\xEF\xBB\xBF//' /home/user/app/start.sh \
+    && sed -i 's/\r$//' /home/user/app/start.sh \
+    && chmod +x /home/user/app/start.sh
 
 ENV NODE_ENV=production
 ENV PORT=3001
