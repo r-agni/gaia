@@ -168,6 +168,10 @@ export default function GlobeViewer({ shaderMode, mapTiles, onCameraChange, onVi
       applyOSM(viewer);
     }
 
+    // Only render when needed (camera move, etc.) — saves GPU when idle
+    viewer.scene.requestRenderMode = true;
+    viewer.scene.maximumRenderTimeChange = Infinity;
+
     // Fly to default position
     viewer.camera.flyTo({
       destination: DEFAULT_POSITION,
@@ -179,9 +183,15 @@ export default function GlobeViewer({ shaderMode, mapTiles, onCameraChange, onVi
       duration: 3,
     });
 
-    // Camera move listener — report position to parent
+    // Camera move listener — throttled: request render + report position to parent
+    const CAMERA_THROTTLE_MS = 150;
+    let lastCameraEmit = 0;
     viewer.camera.changed.addEventListener(() => {
-      if (!onCameraChange || viewer.isDestroyed()) return;
+      if (viewer.isDestroyed()) return;
+      viewer.scene.requestRender();
+      const now = Date.now();
+      if (!onCameraChange || now - lastCameraEmit < CAMERA_THROTTLE_MS) return;
+      lastCameraEmit = now;
       const carto = viewer.camera.positionCartographic;
       onCameraChange(
         CesiumMath.toDegrees(carto.latitude),
@@ -191,7 +201,6 @@ export default function GlobeViewer({ shaderMode, mapTiles, onCameraChange, onVi
         CesiumMath.toDegrees(viewer.camera.pitch),
       );
     });
-    // Lower the threshold so it fires more frequently
     viewer.camera.percentageChanged = 0.01;
 
     onViewerReady?.(viewer);

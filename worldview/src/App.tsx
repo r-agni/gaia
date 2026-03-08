@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Viewer as CesiumViewer, Cartesian3, Math as CesiumMath } from 'cesium';
 import GlobeViewer from './components/globe/GlobeViewer';
 import BattlefieldLayer from './components/layers/BattlefieldLayer';
@@ -9,7 +9,6 @@ import AudioToggle from './components/ui/AudioToggle';
 import Crosshair from './components/ui/Crosshair';
 import SplashScreen from './components/ui/SplashScreen';
 import BattlefieldStatsPanel from './components/ui/BattlefieldStatsPanel';
-import FilmGrain from './components/ui/FilmGrain';
 import { useBattlefield } from './hooks/useBattlefield';
 import { useIsMobile } from './hooks/useIsMobile';
 import { useAudio } from './hooks/useAudio';
@@ -22,7 +21,7 @@ function App() {
   const viewerRef = useRef<CesiumViewer | null>(null);
 
   const [booted, setBooted] = useState(false);
-  const [shaderMode, setShaderMode] = useState<ShaderMode>('crt');
+  const [shaderMode, setShaderMode] = useState<ShaderMode>('none');
 
   const [battlefieldScenario, setBattlefieldScenario] = useState('crossing_at_korzha');
   const [battlefieldAutoPlaying, setBattlefieldAutoPlaying] = useState(false);
@@ -98,10 +97,22 @@ function App() {
     } catch { /* server not running */ }
   }, []);
 
-  const allFeedItems: IntelFeedItem[] = [...battlefieldFeedItems];
+  const allFeedItems = useMemo<IntelFeedItem[]>(
+    () => [...battlefieldFeedItems],
+    [battlefieldFeedItems]
+  );
 
+  const onShaderChange = useCallback((mode: ShaderMode) => {
+    audio.play('shaderSwitch');
+    setShaderMode(mode);
+  }, [audio]);
+
+  const cameraThrottleRef = useRef(0);
   const handleCameraChange = useCallback(
     (lat: number, lon: number, alt: number, heading: number, pitch: number) => {
+      const now = Date.now();
+      if (now - cameraThrottleRef.current < 150) return;
+      cameraThrottleRef.current = now;
       setCamera({ latitude: lat, longitude: lon, altitude: alt, heading, pitch });
     },
     []
@@ -118,8 +129,7 @@ function App() {
   }
 
   return (
-    <div className="w-screen h-screen bg-wv-black overflow-hidden scanline-overlay">
-      <FilmGrain opacity={0.06} />
+    <div className="w-screen h-screen overflow-hidden" style={{ background: '#0f1117' }}>
       <GlobeViewer
         shaderMode={shaderMode}
         mapTiles="google"
@@ -137,7 +147,7 @@ function App() {
       <Crosshair />
       <OperationsPanel
         shaderMode={shaderMode}
-        onShaderChange={(mode) => { audio.play('shaderSwitch'); setShaderMode(mode); }}
+        onShaderChange={onShaderChange}
         isMobile={isMobile}
         battlefieldConnected={battlefieldConnected}
         battlefieldScenario={battlefieldScenario}

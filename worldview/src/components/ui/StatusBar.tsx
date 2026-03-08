@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 
 interface CameraState {
   latitude: number;
@@ -30,7 +30,24 @@ function formatAltitude(metres: number): string {
   return `${metres.toFixed(0)} m`;
 }
 
-export default function StatusBar({ camera, shaderMode, isMobile = false, battlefieldTick, battlefieldUnits }: StatusBarProps) {
+const barStyle: React.CSSProperties = {
+  position: 'fixed',
+  bottom: 0, left: 0, right: 0,
+  background: '#161b27',
+  borderTop: '1px solid #252d3d',
+  borderLeft: 'none',
+  zIndex: 50,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  userSelect: 'none',
+};
+
+const labelStyle: React.CSSProperties = { color: '#5a6478', fontSize: 11 };
+const valStyle: React.CSSProperties = { color: '#d4dbe8', fontSize: 11 };
+const sepStyle: React.CSSProperties = { color: '#252d3d', margin: '0 4px' };
+
+function StatusBar({ camera, shaderMode, isMobile = false, battlefieldTick, battlefieldUnits }: StatusBarProps) {
   const [clock, setClock] = useState(new Date());
 
   useEffect(() => {
@@ -50,50 +67,66 @@ export default function StatusBar({ camera, shaderMode, isMobile = false, battle
 
   if (isMobile) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 h-7 panel-glass flex items-center justify-between px-3 text-[9px] text-wv-muted z-50 select-none mobile-safe-bottom">
-        <span className="text-wv-cyan">{latShort} {lonShort}</span>
-        <span className="text-wv-green glow-green font-bold tracking-wider">{utcShort}</span>
-        <span className="text-wv-text">{alt}</span>
+      <div style={{ ...barStyle, height: 28, padding: '0 12px' }} className="mobile-safe-bottom">
+        <span style={valStyle}>{latShort} {lonShort}</span>
+        <span style={{ color: '#E8A045', fontSize: 11, fontWeight: 600 }}>{utcShort}</span>
+        <span style={valStyle}>{alt}</span>
       </div>
     );
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 h-8 panel-glass flex items-center justify-between px-4 text-[10px] text-wv-muted z-50 select-none">
-      <div className="flex gap-4">
+    <div style={{ ...barStyle, height: 32, padding: '0 16px' }}>
+      {/* Left: position */}
+      <div style={{ display: 'flex', gap: 20 }}>
         <span>
-          LAT <span className="text-wv-cyan glow-cyan">{lat}</span>
+          <span style={labelStyle}>Lat </span>
+          <span style={valStyle}>{lat}</span>
         </span>
         <span>
-          LON <span className="text-wv-cyan glow-cyan">{lon}</span>
+          <span style={labelStyle}>Lon </span>
+          <span style={valStyle}>{lon}</span>
+        </span>
+        <span style={sepStyle}>|</span>
+        <span>
+          <span style={labelStyle}>Alt </span>
+          <span style={valStyle}>{alt}</span>
         </span>
         <span>
-          ALT <span className="text-wv-text">{alt}</span>
-        </span>
-        <span>
-          HDG <span className="text-wv-text">{hdg}</span>
+          <span style={labelStyle}>Hdg </span>
+          <span style={valStyle}>{hdg}</span>
         </span>
       </div>
 
-      <div className="text-wv-green glow-green font-bold tracking-wider">
+      {/* Center: UTC */}
+      <div style={{ color: '#E8A045', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em' }}>
         {utcTime}
       </div>
 
-      <div className="flex gap-4">
+      {/* Right: battle stats + optics */}
+      <div style={{ display: 'flex', gap: 16 }}>
         {battlefieldTick !== undefined && (
           <span>
-            TICK <span className="text-wv-cyan">{battlefieldTick}</span>
+            <span style={labelStyle}>Tick </span>
+            <span style={valStyle}>{battlefieldTick}</span>
           </span>
         )}
         {battlefieldUnits !== undefined && (
           <span>
-            UNITS <span className={battlefieldUnits > 0 ? 'text-wv-green' : 'text-wv-muted'}>{battlefieldUnits}</span>
+            <span style={labelStyle}>Units </span>
+            <span style={{ ...valStyle, color: battlefieldUnits > 0 ? '#4CAF7D' : '#5a6478' }}>
+              {battlefieldUnits}
+            </span>
           </span>
         )}
-        <span className="border-l border-wv-border pl-4">
-          OPTICS <span className="text-wv-cyan uppercase">{shaderMode === 'none' ? 'STD' : shaderMode}</span>
+        <span style={sepStyle}>|</span>
+        <span>
+          <span style={labelStyle}>View </span>
+          <span style={valStyle}>{shaderMode === 'none' ? 'Standard' : shaderMode.toUpperCase()}</span>
         </span>
       </div>
     </div>
   );
 }
+
+export default memo(StatusBar);

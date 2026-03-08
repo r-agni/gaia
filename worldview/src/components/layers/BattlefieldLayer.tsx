@@ -81,7 +81,6 @@ function getUnitAltitude(u: BattlefieldUnit): number {
 
 const ICON_SIZE = 64;
 const LABEL_OFFSET = new CesiumCartesian2(12, -4);
-const HEALTH_BAR_OFFSET = new CesiumCartesian2(0, 22);
 
 /* ─── NATO icon canvas ─────────────────────────────────────── */
 
@@ -93,8 +92,10 @@ function hpColor(fraction: number): string {
   return '#FF4444';
 }
 
+const HP_BUCKETS = 5; // 0%, 25%, 50%, 75%, 100% — fewer cache entries
 function createUnitIcon(side: string, unitType: string, hpFraction: number, inCombat: boolean): HTMLCanvasElement {
-  const key = `${side}:${unitType}:${Math.round(hpFraction * 10)}:${inCombat ? 1 : 0}`;
+  const hpBucket = Math.round(hpFraction * (HP_BUCKETS - 1)) / (HP_BUCKETS - 1);
+  const key = `${side}:${unitType}:${hpBucket}:${inCombat ? 1 : 0}`;
   if (_iconCache.has(key)) return _iconCache.get(key)!;
 
   const S = ICON_SIZE;
@@ -295,15 +296,15 @@ function createUnitIcon(side: string, unitType: string, hpFraction: number, inCo
     }
   }
 
-  // Health bar below icon
+  // Health bar below icon (use bucketed value for consistency with cache key)
   const barW = 28;
   const barH = 4;
   const barX = cx - barW / 2;
   const barY = cy + 20;
   c.fillStyle = 'rgba(0,0,0,0.6)';
   c.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
-  c.fillStyle = hpColor(hpFraction);
-  c.fillRect(barX, barY, barW * Math.max(0, Math.min(1, hpFraction)), barH);
+  c.fillStyle = hpColor(hpBucket);
+  c.fillRect(barX, barY, barW * Math.max(0, Math.min(1, hpBucket)), barH);
 
   _iconCache.set(key, canvas);
   return canvas;
@@ -373,8 +374,15 @@ export interface BattlefieldLayerProps {
   isTracking: boolean;
 }
 
+const SYNC_INTERVAL_MS = 120;
+
 export default function BattlefieldLayer({ state, visible, isTracking }: BattlefieldLayerProps) {
   const { viewer } = useCesium();
+
+  const stateRef = useRef<BattlefieldState | null>(null);
+  const visibleRef = useRef(visible);
+  stateRef.current = state;
+  visibleRef.current = visible;
 
   const positionMapRef = useRef<Map<string, Cartesian3>>(new Map());
   const trailMapRef = useRef<Map<string, { lat: number; lon: number }[]>>(new Map());
@@ -431,7 +439,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
     };
   }, [viewer]);
 
-  /* ── Effect 2: Sync battlefield state into primitives ── */
+  /* ── Effect 2: Clear when hidden or no state; refs updated at top of component ── */
   useEffect(() => {
     const cols = collectionsRef.current;
     let viewerOk = false;
@@ -453,167 +461,183 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
       trailMapRef.current.clear();
       return;
     }
-
-    const activeIds = new Set<string>();
-    const tick = state.tick;
-
-    // Clear combat flash points each tick
-    try { cols.combatPoints.removeAll(); } catch { /* ok */ }
-
-    // Sync units
-    for (const u of state.units) {
-      activeIds.add(u.unit_id);
-
-      const alt = getUnitAltitude(u);
-      const position = Cartesian3.fromDegrees(u.position.lon, u.position.lat, alt);
-      const hpFrac = u.max_health > 0 ? u.health / u.max_health : 0;
-      const inCombat = (u as any).cooldown_ticks_remaining > 0;
-      const typeName = TYPE_NAMES[u.unit_type] ?? u.unit_type;
-
-      // Build label text with status info
-      let statusText = '';
-      if (u.status === 'destroyed') statusText = ' [DEAD]';
-      else if (u.dug_in) statusText = ' [DUG IN]';
-      else if (u.status === 'retreating') statusText = ' [RETREAT]';
-
-      const labelText = `${typeName}${statusText}\n${Math.round(u.health)}/${u.max_health} HP`;
-
-      // Track movement trail
-      const trail = trailMapRef.current.get(u.unit_id) ?? [];
-      const lastPos = trail[trail.length - 1];
-      if (!lastPos || lastPos.lat !== u.position.lat || lastPos.lon !== u.position.lon) {
-        trail.push({ lat: u.position.lat, lon: u.position.lon });
-        if (trail.length > 5) trail.shift();
-        trailMapRef.current.set(u.unit_id, trail);
-      }
-
-      // Update dead-reckoning state
-      unitStateRef.current.set(u.unit_id, {
-        lat: u.position.lat,
-        lon: u.position.lon,
-        alt,
-        heading: u.heading_deg,
-        speedMps: TYPE_SPEED_MPS[u.unit_type] ?? 0,
-        updatedAt: Date.now(),
-      });
-      positionMapRef.current.set(u.unit_id, position);
-
-      const sideColor = Color.fromCssColorString(SIDE_COLORS[u.side] ?? '#FFFFFF');
-      const labelColor = Color.fromCssColorString(SIDE_COLORS_LIGHT[u.side] ?? '#FFFFFF');
-
-      const existing = primitiveMapRef.current.get(u.unit_id);
-      if (existing) {
-        existing.billboard.position = position;
-        existing.billboard.image = createUnitIcon(u.side, u.unit_type, hpFrac, inCombat);
-        existing.label.position = position;
-        existing.label.text = labelText;
-        existing.label.fillColor = labelColor.withAlpha(0.9);
-      } else {
-        const billboard = cols.billboards.add({
-          position,
-          image: createUnitIcon(u.side, u.unit_type, hpFrac, inCombat),
-          color: Color.WHITE,
-          scale: 1.0,
-          horizontalOrigin: HorizontalOrigin.CENTER,
-          verticalOrigin: VerticalOrigin.CENTER,
-          scaleByDistance: new NearFarScalar(500, 1.6, 2e6, 0.3),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        });
-        const label = cols.labels.add({
-          position,
-          text: labelText,
-          font: '11px monospace',
-          fillColor: labelColor.withAlpha(0.9),
-          outlineColor: Color.BLACK,
-          outlineWidth: 3,
-          style: LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: VerticalOrigin.BOTTOM,
-          pixelOffset: LABEL_OFFSET,
-          scaleByDistance: new NearFarScalar(500, 1.0, 5e5, 0),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        });
-        primitiveMapRef.current.set(u.unit_id, { billboard, label });
-      }
-
-      // Combat flash: bright point at unit position
-      if (inCombat) {
-        cols.combatPoints.add({
-          position,
-          color: sideColor.withAlpha(0.6),
-          pixelSize: 24,
-          scaleByDistance: new NearFarScalar(500, 2.0, 5e5, 0.2),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        });
-      }
-    }
-
-    // Remove stale unit primitives
-    for (const [id, prims] of primitiveMapRef.current) {
-      if (!activeIds.has(id)) {
-        try { cols.billboards.remove(prims.billboard); } catch { /* ok */ }
-        try { cols.labels.remove(prims.label); } catch { /* ok */ }
-        primitiveMapRef.current.delete(id);
-        positionMapRef.current.delete(id);
-        unitStateRef.current.delete(id);
-        trailMapRef.current.delete(id);
-      }
-    }
-
-    // Sync objectives with billboard icons and labels
-    const activeObjIds = new Set<string>();
-    for (const obj of state.objectives) {
-      activeObjIds.add(obj.objective_id);
-      const pos = Cartesian3.fromDegrees(obj.position.lon, obj.position.lat, 5);
-      const objImage = createObjectiveIcon(obj.controlling_side, obj.capture_progress, tick);
-
-      let objColor = Color.GOLD;
-      if (obj.controlling_side === 'attacker') objColor = Color.fromCssColorString('#FF4444');
-      else if (obj.controlling_side === 'defender') objColor = Color.fromCssColorString('#4488FF');
-
-      const existingObj = objPrimitiveMapRef.current.get(obj.objective_id);
-      if (existingObj) {
-        existingObj.billboard.position = pos;
-        existingObj.billboard.image = objImage;
-        existingObj.label.position = pos;
-        existingObj.label.text = obj.name || obj.objective_id;
-        existingObj.label.fillColor = objColor.withAlpha(0.9);
-      } else {
-        const billboard = cols.objBillboards.add({
-          position: pos,
-          image: objImage,
-          color: Color.WHITE,
-          scale: 1.0,
-          horizontalOrigin: HorizontalOrigin.CENTER,
-          verticalOrigin: VerticalOrigin.CENTER,
-          scaleByDistance: new NearFarScalar(1e3, 1.8, 5e6, 0.4),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        });
-        const label = cols.objLabels.add({
-          position: pos,
-          text: obj.name || obj.objective_id,
-          font: 'bold 12px monospace',
-          fillColor: objColor.withAlpha(0.9),
-          outlineColor: Color.BLACK,
-          outlineWidth: 3,
-          style: LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: VerticalOrigin.TOP,
-          pixelOffset: new CesiumCartesian2(0, 26),
-          scaleByDistance: new NearFarScalar(1e3, 1.0, 5e5, 0),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        });
-        objPrimitiveMapRef.current.set(obj.objective_id, { billboard, label });
-      }
-    }
-
-    // Remove stale objective primitives
-    for (const [id, prims] of objPrimitiveMapRef.current) {
-      if (!activeObjIds.has(id)) {
-        try { cols.objBillboards.remove(prims.billboard); } catch { /* ok */ }
-        try { cols.objLabels.remove(prims.label); } catch { /* ok */ }
-        objPrimitiveMapRef.current.delete(id);
-      }
-    }
   }, [viewer, state, visible]);
+
+  /* ── Effect 2b: Throttled sync of state to Cesium (runs at fixed interval) ── */
+  useEffect(() => {
+    if (!viewer || viewer.isDestroyed()) return;
+    const cols = collectionsRef.current;
+    if (!cols) return;
+
+    const tick = () => {
+      const state = stateRef.current;
+      if (!state || !visibleRef.current) return;
+      try {
+        if (viewer.isDestroyed()) return;
+      } catch {
+        return;
+      }
+      const c = collectionsRef.current;
+      if (!c) return;
+
+      const activeIds = new Set<string>();
+      const stateTick = state.tick;
+
+      try {
+        c.combatPoints.removeAll();
+      } catch { /* ok */ }
+
+      for (const u of state.units) {
+        activeIds.add(u.unit_id);
+
+        const alt = getUnitAltitude(u);
+        const position = Cartesian3.fromDegrees(u.position.lon, u.position.lat, alt);
+        const hpFrac = u.max_health > 0 ? u.health / u.max_health : 0;
+        const inCombat = (u as any).cooldown_ticks_remaining > 0;
+        const typeName = TYPE_NAMES[u.unit_type] ?? u.unit_type;
+
+        let statusText = '';
+        if (u.status === 'destroyed') statusText = ' [DEAD]';
+        else if (u.dug_in) statusText = ' [DUG IN]';
+        else if (u.status === 'retreating') statusText = ' [RETREAT]';
+
+        const labelText = `${typeName}${statusText}\n${Math.round(u.health)}/${u.max_health} HP`;
+
+        const trail = trailMapRef.current.get(u.unit_id) ?? [];
+        const lastPos = trail[trail.length - 1];
+        if (!lastPos || lastPos.lat !== u.position.lat || lastPos.lon !== u.position.lon) {
+          trail.push({ lat: u.position.lat, lon: u.position.lon });
+          if (trail.length > 5) trail.shift();
+          trailMapRef.current.set(u.unit_id, trail);
+        }
+
+        unitStateRef.current.set(u.unit_id, {
+          lat: u.position.lat,
+          lon: u.position.lon,
+          alt,
+          heading: u.heading_deg,
+          speedMps: TYPE_SPEED_MPS[u.unit_type] ?? 0,
+          updatedAt: Date.now(),
+        });
+        positionMapRef.current.set(u.unit_id, position);
+
+        const sideColor = Color.fromCssColorString(SIDE_COLORS[u.side] ?? '#FFFFFF');
+        const labelColor = Color.fromCssColorString(SIDE_COLORS_LIGHT[u.side] ?? '#FFFFFF');
+
+        const existing = primitiveMapRef.current.get(u.unit_id);
+        if (existing) {
+          existing.billboard.position = position;
+          existing.billboard.image = createUnitIcon(u.side, u.unit_type, hpFrac, inCombat);
+          existing.label.position = position;
+          existing.label.text = labelText;
+          existing.label.fillColor = labelColor.withAlpha(0.9);
+        } else {
+          const billboard = c.billboards.add({
+            position,
+            image: createUnitIcon(u.side, u.unit_type, hpFrac, inCombat),
+            color: Color.WHITE,
+            scale: 1.0,
+            horizontalOrigin: HorizontalOrigin.CENTER,
+            verticalOrigin: VerticalOrigin.CENTER,
+            scaleByDistance: new NearFarScalar(500, 1.6, 2e6, 0.3),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+          const label = c.labels.add({
+            position,
+            text: labelText,
+            font: '11px monospace',
+            fillColor: labelColor.withAlpha(0.9),
+            outlineColor: Color.BLACK,
+            outlineWidth: 3,
+            style: LabelStyle.FILL_AND_OUTLINE,
+            verticalOrigin: VerticalOrigin.BOTTOM,
+            pixelOffset: LABEL_OFFSET,
+            scaleByDistance: new NearFarScalar(500, 1.0, 5e5, 0),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+          primitiveMapRef.current.set(u.unit_id, { billboard, label });
+        }
+
+        if (inCombat) {
+          c.combatPoints.add({
+            position,
+            color: sideColor.withAlpha(0.6),
+            pixelSize: 24,
+            scaleByDistance: new NearFarScalar(500, 2.0, 5e5, 0.2),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+        }
+      }
+
+      for (const [id, prims] of primitiveMapRef.current) {
+        if (!activeIds.has(id)) {
+          try { c.billboards.remove(prims.billboard); } catch { /* ok */ }
+          try { c.labels.remove(prims.label); } catch { /* ok */ }
+          primitiveMapRef.current.delete(id);
+          positionMapRef.current.delete(id);
+          unitStateRef.current.delete(id);
+          trailMapRef.current.delete(id);
+        }
+      }
+
+      const activeObjIds = new Set<string>();
+      for (const obj of state.objectives) {
+        activeObjIds.add(obj.objective_id);
+        const pos = Cartesian3.fromDegrees(obj.position.lon, obj.position.lat, 5);
+        const objImage = createObjectiveIcon(obj.controlling_side, obj.capture_progress, stateTick);
+
+        let objColor = Color.GOLD;
+        if (obj.controlling_side === 'attacker') objColor = Color.fromCssColorString('#FF4444');
+        else if (obj.controlling_side === 'defender') objColor = Color.fromCssColorString('#4488FF');
+
+        const existingObj = objPrimitiveMapRef.current.get(obj.objective_id);
+        if (existingObj) {
+          existingObj.billboard.position = pos;
+          existingObj.billboard.image = objImage;
+          existingObj.label.position = pos;
+          existingObj.label.text = obj.name || obj.objective_id;
+          existingObj.label.fillColor = objColor.withAlpha(0.9);
+        } else {
+          const billboard = c.objBillboards.add({
+            position: pos,
+            image: objImage,
+            color: Color.WHITE,
+            scale: 1.0,
+            horizontalOrigin: HorizontalOrigin.CENTER,
+            verticalOrigin: VerticalOrigin.CENTER,
+            scaleByDistance: new NearFarScalar(1e3, 1.8, 5e6, 0.4),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+          const label = c.objLabels.add({
+            position: pos,
+            text: obj.name || obj.objective_id,
+            font: 'bold 12px monospace',
+            fillColor: objColor.withAlpha(0.9),
+            outlineColor: Color.BLACK,
+            outlineWidth: 3,
+            style: LabelStyle.FILL_AND_OUTLINE,
+            verticalOrigin: VerticalOrigin.TOP,
+            pixelOffset: new CesiumCartesian2(0, 26),
+            scaleByDistance: new NearFarScalar(1e3, 1.0, 5e5, 0),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+          objPrimitiveMapRef.current.set(obj.objective_id, { billboard, label });
+        }
+      }
+
+      for (const [id, prims] of objPrimitiveMapRef.current) {
+        if (!activeObjIds.has(id)) {
+          try { c.objBillboards.remove(prims.billboard); } catch { /* ok */ }
+          try { c.objLabels.remove(prims.label); } catch { /* ok */ }
+          objPrimitiveMapRef.current.delete(id);
+        }
+      }
+    };
+
+    const id = setInterval(tick, SYNC_INTERVAL_MS);
+    tick(); // run once immediately when state is available
+    return () => clearInterval(id);
+  }, [viewer]);
 
   /* ── Effect 3: Visibility toggling ── */
   useEffect(() => {
@@ -630,7 +654,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
 
-    const BULK_MS = 500;
+    const BULK_MS = 900;
     let lastBulkUpdate = 0;
 
     const onPreUpdate = () => {
