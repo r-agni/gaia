@@ -140,6 +140,12 @@ _openenv_server.register_routes(app)
 # ─── Custom REST endpoints ────────────────────────────────────────────────────
 
 
+@app.get("/game/state")
+async def game_state():
+    """Full game state for frontend polling."""
+    return _serialize_full_state()
+
+
 @app.get("/datasets")
 async def datasets():
     return list_datasets()

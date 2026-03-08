@@ -978,7 +978,7 @@ const GEOGUESS_WS = GEOGUESS_API.replace(/^http/, 'ws');
 
 app.get('/api/geoguess/state', async (req, res) => {
   try {
-    const r = await fetch(`${GEOGUESS_API}/state`);
+    const r = await fetch(`${GEOGUESS_API}/game/state`);
     if (!r.ok) return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
     res.json(await r.json());
   } catch (err) {

@@ -1,6 +1,6 @@
 /**
- * useGeoguess — WebSocket hook for GeoGuessEnv state.
- * Mirrors the structure of useBattlefield.ts but for the GeoGuessr game.
+ * useGeoguess — Polls GeoGuessEnv state from the backend.
+ * Replaces the fragile WebSocket chain with simple HTTP polling.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -38,12 +38,10 @@ export interface GeoGuessState {
   total_rounds: number;
   is_terminal: boolean;
   episode_score: number;
-  // Secret location (null = still hidden during active round)
   secret_lat: number | null;
   secret_lon: number | null;
   secret_country: string;
   secret_region: string;
-  // Agent's latest guess pin
   current_guess_lat: number | null;
   current_guess_lon: number | null;
   guesses: GeoGuessGuess[];
@@ -51,7 +49,6 @@ export interface GeoGuessState {
   round_history: RoundSummary[];
   training_mode?: boolean;
   episode?: number;
-  // Oversight agent
   oversight_flags: string[];
   oversight_summary?: {
     total_flags: number;
@@ -63,7 +60,7 @@ export interface GeoGuessState {
   };
 }
 
-const RECONNECT_DELAY = 3000;
+const POLL_INTERVAL = 600;
 
 export function useGeoguess(enabled: boolean): {
   state: GeoGuessState | null;
@@ -75,68 +72,48 @@ export function useGeoguess(enabled: boolean): {
   const [state, setState] = useState<GeoGuessState | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const shouldReconnect = useRef(false);
+  const polling = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    shouldReconnect.current = true;
-
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const isDev = host.includes('5173');
-    const url = isDev
-      ? `ws://${window.location.hostname}:3001/ws/geoguess`
-      : `${proto}//${host}/ws/geoguess`;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
-
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (
-          msg.type === 'state_update' ||
-          msg.type === 'episode_start' ||
-          msg.type === 'round_end' ||
-          msg.type === 'episode_end' ||
-          msg.type === 'round_start' ||
-          msg.type === 'oversight_flag'
-        ) {
-          const { type: _t, ...rest } = msg;
-          setState(rest as GeoGuessState);
+  const poll = useCallback(async () => {
+    if (!polling.current) return;
+    try {
+      const r = await fetch('/api/geoguess/state');
+      if (r.ok) {
+        const data = await r.json();
+        if (data && data.episode_id) {
+          setState(data as GeoGuessState);
         }
-      } catch { /* ignore */ }
-    };
-
-    ws.onerror = () => setError('WebSocket error');
-
-    ws.onclose = () => {
-      setConnected(false);
-      wsRef.current = null;
-      if (shouldReconnect.current) {
-        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
+        setConnected(true);
+        setError(null);
+      } else {
+        setConnected(false);
       }
-    };
+    } catch {
+      setConnected(false);
+      setError('Cannot reach server');
+    }
+    if (polling.current) {
+      timerRef.current = setTimeout(poll, POLL_INTERVAL);
+    }
   }, []);
 
+  const connect = useCallback(() => {
+    if (polling.current) return;
+    polling.current = true;
+    poll();
+  }, [poll]);
+
   const disconnect = useCallback(() => {
-    shouldReconnect.current = false;
-    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-    wsRef.current?.close();
-    wsRef.current = null;
+    polling.current = false;
+    if (timerRef.current) clearTimeout(timerRef.current);
     setState(null);
     setConnected(false);
   }, []);
 
   useEffect(() => {
     if (enabled) connect();
-    return () => { shouldReconnect.current = false; wsRef.current?.close(); };
+    return () => { polling.current = false; if (timerRef.current) clearTimeout(timerRef.current); };
   }, [enabled, connect]);
 
   return { state, connected, connect, disconnect, error };
