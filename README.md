@@ -31,13 +31,13 @@ Why this fits:
 
 ### Selected Partner Sub-Themes (max 2)
 1. **Fleet AI - Scalable Oversight**
-2. **Halluminate - Multi-Actor Environments**
+2. **Scaler AI Labs - Multi-App RL Environment for Enterprise Workflows**
 
 Why these two:
 - Fleet AI: first-class oversight pipeline (`oversight_flags`, `oversight_summary`) is implemented and streamed live.
-- Halluminate: the acting model coordinates multiple evidence channels (tool providers as external actors/data sources) under strict budgets to complete a mission objective.
+- Scaler AI Labs: the environment matches Statement 3.1 world-modeling behavior with tool/API interaction, business-rule-like constraints (budgeted actions), and multi-step workflow execution.
 
-### Secondary Technical Alignment (not selected for judging cap)
+### Secondary Technical Alignment
 **Statement 3.1: World Modeling (Professional Tasks)**  
 The agent interacts with dynamic tools/APIs and must maintain consistent internal beliefs over multiple steps.
 
@@ -500,7 +500,7 @@ Capture reward trends from trainer logs for the demo video.
 - Training evidence: include GRPO logs/curves showing reward improvement.
 - Partner selection to submit:
   - Fleet AI - Scalable Oversight
-  - Halluminate - Multi-Actor Environments
+  - Scaler AI Labs - Multi-App RL Environment for Enterprise Workflows
 - Deployment:
   - HF Spaces (Docker Space) for OpenEnv-compliant hosted demo
   - Northflank `gaia-app` for combined UI + API runtime
