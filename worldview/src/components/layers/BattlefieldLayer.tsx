@@ -493,7 +493,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
         const alt = getUnitAltitude(u);
         const position = Cartesian3.fromDegrees(u.position.lon, u.position.lat, alt);
         const hpFrac = u.max_health > 0 ? u.health / u.max_health : 0;
-        const inCombat = (u as any).cooldown_ticks_remaining > 0;
+        const inCombat = (u.cooldown_ticks_remaining ?? 0) > 0;
         const typeName = TYPE_NAMES[u.unit_type] ?? u.unit_type;
 
         let statusText = '';
@@ -632,6 +632,10 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
           objPrimitiveMapRef.current.delete(id);
         }
       }
+
+      // requestRenderMode=true means Cesium won't redraw unless asked explicitly.
+      // Force a render now that primitives have been mutated.
+      try { if (!viewer.isDestroyed()) viewer.scene.requestRender(); } catch { /* ok */ }
     };
 
     const id = setInterval(tick, SYNC_INTERVAL_MS);
@@ -692,6 +696,9 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
           prims.label.show = vis;
         } catch { /* ok */ }
       }
+
+      // Request a render so dead-reckoning positions are visible.
+      try { if (!viewer.isDestroyed()) viewer.scene.requestRender(); } catch { /* ok */ }
     };
 
     viewer.scene.preUpdate.addEventListener(onPreUpdate);

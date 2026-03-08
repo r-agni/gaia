@@ -122,7 +122,7 @@ function IntelFeed({ items, isMobile = false }: IntelFeedProps) {
   }
 
   return (
-    <div style={{ position: 'fixed', top: 16, right: 16, width: 280, zIndex: 40, ...panelStyle }}>
+    <div style={{ position: 'fixed', bottom: 48, right: 16, width: 280, zIndex: 40, ...panelStyle }}>
       {/* Header */}
       <div
         style={{

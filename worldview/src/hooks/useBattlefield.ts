@@ -11,6 +11,7 @@ export interface BattlefieldUnit {
   status: string;
   heading_deg: number;
   dug_in: boolean;
+  cooldown_ticks_remaining?: number;
 }
 
 export interface BattlefieldObjective {
@@ -100,7 +101,7 @@ export function useBattlefield(enabled: boolean): {
               type: 'battle' as const,
               message: entry.description,
             }));
-            setFeedItems(items);
+            setFeedItems(prev => [...prev, ...items].slice(-150));
           }
         } else if (msg.type === 'episode_end') {
           // Patch winner into current state

@@ -70,8 +70,8 @@ function App() {
     if (!hasFlewToBattlefield.current || isNewEpisode) {
       hasFlewToBattlefield.current = true;
       const anchor = battlefieldState.geo_anchor;
-      const lon = anchor ? anchor.lon0 : 22.2;
-      const lat = anchor ? anchor.lat0 : 48.5;
+      const lon = (anchor && anchor.lon0 != null) ? anchor.lon0 : 22.2;
+      const lat = (anchor && anchor.lat0 != null) ? anchor.lat0 : 48.5;
       viewer.trackedEntity = undefined;
       viewer.camera.flyTo({
         destination: Cartesian3.fromDegrees(lon, lat, 12_000),
@@ -187,7 +187,7 @@ function App() {
         shaderMode={shaderMode}
         isMobile={isMobile}
         battlefieldTick={battlefieldState?.tick}
-        battlefieldUnits={battlefieldState?.units.length ?? 0}
+        battlefieldUnits={battlefieldState?.units.length}
       />
       <AudioToggle muted={audio.muted} onToggle={audio.toggleMute} isMobile={isMobile} />
     </div>
