@@ -13,9 +13,8 @@ COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
-COPY --chown=user worldview/dist /home/user/app/worldview/dist
+# SKIP worldview/dist for now - test if server copy works
 COPY --chown=user worldview/server /home/user/app/worldview/server
-# Use minimal package.json with only server runtime deps
 COPY --chown=user worldview/package.hf.json /home/user/app/worldview/package.json
 RUN cd /home/user/app/worldview && npm install --no-audit --no-fund
 
