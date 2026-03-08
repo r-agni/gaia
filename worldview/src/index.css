@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@500;700&display=swap');
 
 /* ── Intelligence Dashboard Palette ── */
 @theme {
@@ -90,4 +91,31 @@ html, body {
 /* ── Accent border utility ── */
 .accent-border {
   border-left: 2px solid var(--color-accent);
+}
+
+.splash-bg-grid {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(114, 162, 240, 0.16), transparent 40%),
+    radial-gradient(circle at 80% 75%, rgba(245, 184, 78, 0.12), transparent 45%),
+    linear-gradient(rgba(124, 155, 201, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 155, 201, 0.08) 1px, transparent 1px);
+  background-size: auto, auto, 28px 28px, 28px 28px;
+}
+
+@keyframes splash-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes splash-spin-rev {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+.splash-spin-slow {
+  animation: splash-spin 10s linear infinite;
+}
+
+.splash-spin-rev {
+  animation: splash-spin-rev 14s linear infinite;
 }

@@ -20,12 +20,14 @@ agents = [
     "httpx>=0.27",
 ]
 training = [
-    "trl>=0.9",
-    "transformers>=4.45",
-    "torch>=2.3",
-    "datasets>=2.20",
-    "accelerate>=0.30",
-    "vllm>=0.4",
+    # Pinned to avoid long resolver backtracking during container builds.
+    "trl==0.9.6",
+    "transformers==4.45.2",
+    "torch==2.3.1",
+    "datasets==2.20.0",
+    "accelerate==0.31.0",
+    "numpy==1.26.4",
+    "vllm==0.5.3.post1",
 ]
 dev = [
     "pytest>=8.0",
