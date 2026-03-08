@@ -975,6 +975,7 @@ setTimeout(refreshRouteRegistry, 5_000);
 // ─── GeoGuess env proxy (Python FastAPI) ──────────────────────
 const GEOGUESS_API = process.env.GEOGUESS_API || 'http://127.0.0.1:8002';
 const GEOGUESS_WS = GEOGUESS_API.replace(/^http/, 'ws');
+const RUN_GRPO_TRAINING = (process.env.RUN_GRPO_TRAINING || '').toLowerCase() === 'true';
 
 app.get('/api/geoguess/state', async (req, res) => {
   try {
@@ -1095,6 +1096,16 @@ app.get('/api/geoguess/training/history', async (_req, res) => {
   }
 });
 
+app.get('/api/geoguess/training/runtime_status', async (_req, res) => {
+  try {
+    const r = await fetch(`${GEOGUESS_API}/training/runtime_status`);
+    if (!r.ok) return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
+    res.json(await r.json());
+  } catch (err) {
+    res.status(503).json({ error: 'GeoGuess env not running', detail: err.message });
+  }
+});
+
 // ─── Production: serve built React app (static + SPA fallback) ───
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
@@ -1155,6 +1166,10 @@ if (isDirectRun) {
     `);
     // Fallback: start auto_play if the shell script did not (e.g. health check failed)
     setTimeout(async () => {
+      if (RUN_GRPO_TRAINING) {
+        console.log('[GeoGuess] Node auto_play fallback disabled because RUN_GRPO_TRAINING=true');
+        return;
+      }
       try {
         const statusRes = await fetch(`${GEOGUESS_API}/auto_play/status`);
         if (statusRes.ok) {
