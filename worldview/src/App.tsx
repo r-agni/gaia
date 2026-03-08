@@ -23,8 +23,11 @@ function App() {
   const [booted, setBooted] = useState(false);
   const [shaderMode, setShaderMode] = useState<ShaderMode>('none');
 
+  const [viewerReady, setViewerReady] = useState(false);
+
   const [battlefieldScenario, setBattlefieldScenario] = useState('crossing_at_korzha');
   const [battlefieldAutoPlaying, setBattlefieldAutoPlaying] = useState(false);
+  const [battlefieldError, setBattlefieldError] = useState<string | null>(null);
 
   const [camera, setCamera] = useState({
     latitude: 48.5,
@@ -44,6 +47,7 @@ function App() {
 
   const handleViewerReady = useCallback((viewer: CesiumViewer) => {
     viewerRef.current = viewer;
+    setViewerReady(true);
   }, []);
 
   // Auto-connect to battlefield on boot
@@ -55,7 +59,8 @@ function App() {
     }
   }, [booted, battlefieldConnect]);
 
-  // Fly to battlefield when first state arrives or when a new episode starts (e.g. Run Sim)
+  // Fly to battlefield when first state arrives or when a new episode starts (e.g. Run Sim).
+  // Also re-runs when viewerReady flips, in case state arrived before the viewer was initialised.
   const hasFlewToBattlefield = useRef(false);
   useEffect(() => {
     if (!battlefieldState) return;
@@ -77,26 +82,37 @@ function App() {
         },
         duration: 2,
       });
+      // requestRenderMode: make sure the frame actually draws after flying
+      if (!viewer.isDestroyed()) viewer.scene.requestRender();
     }
-  }, [battlefieldState]);
+  }, [battlefieldState, viewerReady]); // viewerReady in deps so we retry if viewer wasn't ready
 
   // Auto-play handlers
   const handleBattlefieldAutoPlayStart = useCallback(async () => {
+    setBattlefieldError(null);
     try {
-      await fetch('/api/battlefield/auto_play/start', {
+      const res = await fetch('/api/battlefield/auto_play/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenario_id: battlefieldScenario, tick_delay_ms: 800 }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setBattlefieldError(body?.error ?? `Server error ${res.status}`);
+        return;
+      }
       setBattlefieldAutoPlaying(true);
-    } catch { /* server not running */ }
+    } catch (err) {
+      setBattlefieldError('Backend unavailable — ensure the battlefield service is running.');
+    }
   }, [battlefieldScenario]);
 
   const handleBattlefieldAutoPlayStop = useCallback(async () => {
     try {
       await fetch('/api/battlefield/auto_play/stop', { method: 'POST' });
       setBattlefieldAutoPlaying(false);
-    } catch { /* server not running */ }
+      setBattlefieldError(null);
+    } catch { /* ignore */ }
   }, []);
 
   const allFeedItems = useMemo<IntelFeedItem[]>(
@@ -162,6 +178,7 @@ function App() {
         battlefieldAutoPlaying={battlefieldAutoPlaying}
         onBattlefieldAutoPlayStart={handleBattlefieldAutoPlayStart}
         onBattlefieldAutoPlayStop={handleBattlefieldAutoPlayStop}
+        battlefieldError={battlefieldError}
       />
       <BattlefieldStatsPanel state={battlefieldState} visible={true} />
       <IntelFeed items={allFeedItems} isMobile={isMobile} />

@@ -30,6 +30,7 @@ interface OperationsPanelProps {
   battlefieldAutoPlaying?: boolean;
   onBattlefieldAutoPlayStart?: () => void;
   onBattlefieldAutoPlayStop?: () => void;
+  battlefieldError?: string | null;
 }
 
 const S = {
@@ -118,6 +119,7 @@ function OperationsPanel({
   battlefieldAutoPlaying = false,
   onBattlefieldAutoPlayStart,
   onBattlefieldAutoPlayStop,
+  battlefieldError,
 }: OperationsPanelProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -176,6 +178,22 @@ function OperationsPanel({
             <span>{battlefieldAutoPlaying ? '■' : '▶'}</span>
             {battlefieldAutoPlaying ? 'Stop Sim' : 'Run Sim'}
           </button>
+        )}
+
+        {battlefieldError && (
+          <div style={{
+            marginTop: 4,
+            marginBottom: 2,
+            padding: '5px 8px',
+            background: '#D6404518',
+            borderLeft: '2px solid #D64045',
+            borderRadius: 2,
+            fontSize: 10,
+            color: '#D64045',
+            lineHeight: 1.4,
+          }}>
+            {battlefieldError}
+          </div>
         )}
 
         {battlefieldTick !== undefined && battlefieldMaxTicks !== undefined && (
