@@ -19,7 +19,13 @@ COPY battlefield_env/pyproject.toml /app/battlefield_env/
 COPY battlefield_env/battlefield /app/battlefield_env/battlefield
 COPY battlefield_env/agents /app/battlefield_env/agents
 COPY battlefield_env/client /app/battlefield_env/client
-RUN cd /app/battlefield_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
+COPY battlefield_env/scripts /app/battlefield_env/scripts
+ARG INSTALL_TRAINING=false
+RUN if [ "$INSTALL_TRAINING" = "true" ]; then \
+      cd /app/battlefield_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \
+    else \
+      cd /app/battlefield_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"; \
+    fi
 
 # Worldview (Node server + built static)
 COPY --from=worldview-build /worldview/dist /app/worldview/dist
