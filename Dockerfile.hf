@@ -1,8 +1,15 @@
 # Stage 2: runtime (Node + Python in one image)
 FROM node:20-bookworm-slim AS runtime
 
-# HF Spaces requires the container to run as uid 1000
-RUN useradd -m -u 1000 user
+# Ensure a stable non-root user named "user".
+# Some base images already have UID 1000 in use; avoid hard failure.
+RUN if id -u user >/dev/null 2>&1; then \
+      true; \
+    elif getent passwd 1000 >/dev/null 2>&1; then \
+      useradd -m user; \
+    else \
+      useradd -m -u 1000 user; \
+    fi
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
@@ -18,7 +25,7 @@ COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
-# Worldview â€” pre-built dist committed to repo (no Vite build needed)
+# Worldview — pre-built dist committed to repo (no Vite build needed)
 COPY --chown=user worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
 COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/app/worldview/
