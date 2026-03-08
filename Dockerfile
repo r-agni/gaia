@@ -1,8 +1,11 @@
-FROM node:20-bookworm-slim
+# Use Python base (has Python 3), install Node.js without apt
+FROM python:3.11-slim-bookworm
 
+# HF Spaces requires uid 1000
 RUN useradd -m -u 1000 user
 
-RUN apt-get update && apt-get install -y --no-install-recommends     python3 python3-pip python3-venv     && rm -rf /var/lib/apt/lists/*
+# Install Node.js 20 via NodeSource (single apt-get call)
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash -     && apt-get install -y nodejs     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/user/app
 
@@ -11,9 +14,9 @@ COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
 COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
 COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
-RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
+RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir -e ".[agents]"
 
-# SKIP worldview/dist for now - test if server copy works
+COPY --chown=user worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
 COPY --chown=user worldview/package.hf.json /home/user/app/worldview/package.json
 RUN cd /home/user/app/worldview && npm install --no-audit --no-fund
