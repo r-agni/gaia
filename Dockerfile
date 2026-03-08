@@ -20,6 +20,7 @@ COPY geoguess_env/geoguess /app/geoguess_env/geoguess
 COPY geoguess_env/agents /app/geoguess_env/agents
 COPY geoguess_env/client /app/geoguess_env/client
 COPY geoguess_env/data /app/geoguess_env/data
+# Set INSTALL_TRAINING=true to install TRL/vLLM/torch for auto GRPO (see DEPLOY.md §3)
 ARG INSTALL_TRAINING=false
 RUN if [ "$INSTALL_TRAINING" = "true" ]; then \
       cd /app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \

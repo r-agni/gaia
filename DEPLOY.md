@@ -80,9 +80,23 @@ northflank patch service combined --projectId hackathon --serviceId gaia-app \
 
 ---
 
+## 3. Auto-run GRPO training (optional)
+
+To start **GRPO training** automatically when the container starts (vLLM + trainer on the same H100):
+
+1. **Build** the image with training deps: set build arg **`INSTALL_TRAINING=true`** in Northflank (Build → Build arguments or Docker build args). This installs `trl`, `vllm`, `torch`, etc., and increases image size.
+2. **Deploy** with GPU enabled (see §2) and set runtime env:
+   - **`RUN_GRPO_TRAINING=true`** — starts vLLM on port 8000, then runs `train_grpo.py` (connects to GeoGuess env at `ws://127.0.0.1:8002`).
+   - **`BASE_MODEL`** (optional) — model for vLLM and trainer (default: `Qwen/Qwen2.5-7B-Instruct`). Use a smaller model (e.g. `Qwen/Qwen2.5-0.5B-Instruct`) if you hit OOM on a single H100.
+   - **`OUTPUT_DIR`** (optional) — where to save checkpoints (default: `/app/geoguess_env/geoguess-grpo-out`).
+
+The dataset must exist at `geoguess_env/data/training_1k.jsonl` (it is in the repo). Training runs in the background; the UI and auto_play continue to run as usual.
+
+---
+
 ## Summary
 
 | Component | Resource | Northflank setup |
 |---|---|---|
 | UI + GeoGuess API | CPU (default) or 1× H100 | `gaia-app` in `hackathon`; Dockerfile auto-starts both |
-| GRPO training | **1× H100 (80 GB)** | Enable GPU on gaia-app or create a Job |
+| GRPO training | **1× H100 (80 GB)** | Build with `INSTALL_TRAINING=true`, set `RUN_GRPO_TRAINING=true` and GPU |
