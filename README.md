@@ -544,3 +544,6 @@ Capture reward trends from trainer logs for the demo video.
   - HF Spaces (Docker Space) for OpenEnv-compliant hosted demo
   - Northflank `gaia-app` for combined UI + API runtime
   - optional H100 for training/inference acceleration
+ 
+
+  * Credits: inspiration from repo: https://github.com/kevtoe/worldview
