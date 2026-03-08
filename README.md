@@ -1,3 +1,13 @@
+---
+title: GAIA GeoGuess
+emoji: 🌍
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 3001
+pinned: false
+---
+
 # GAIA: Geo-Reasoning + Oversight OpenEnv Environment
 
 GAIA is an OpenEnv-compatible RL environment for training and evaluating agents on geospatial reasoning under uncertainty.  
