@@ -5,6 +5,7 @@ colorFrom: blue
 colorTo: indigo
 sdk: docker
 app_port: 3001
+dockerfile: Dockerfile.hf
 pinned: false
 ---
 
