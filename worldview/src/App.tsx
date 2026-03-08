@@ -187,13 +187,6 @@ function App() {
         camera={camera}
         shaderMode={shaderMode}
         isMobile={isMobile}
-        dataStatus={{
-          flights: 0,
-          satellites: 0,
-          earthquakes: 0,
-          cctv: 0,
-          ships: 0,
-        }}
       />
 
       <AudioToggle muted={audio.muted} onToggle={audio.toggleMute} isMobile={isMobile} />
