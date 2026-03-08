@@ -1,156 +1,122 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { AudioControls } from '../../hooks/useAudio';
-import type { SoundEffect } from '../../lib/audio';
 
 interface SplashScreenProps {
   onComplete: () => void;
   audio?: AudioControls;
 }
 
-const BOOT_LINES = [
-  'WORLDVIEW TACTICAL INTELLIGENCE SYSTEM',
-  '═════════════════════════════════════',
-  '',
-  'INITIALISING CESIUM 3D ENGINE............ OK',
-  'LOADING GOOGLE PHOTOREALISTIC 3D TILES.. OK',
-  'CONNECTING OPENSKY NETWORK.............. OK',
-  'LOADING CELESTRAK SATELLITE DATA........ OK',
-  'CONNECTING USGS SEISMIC FEED............ OK',
-  'CONNECTING GLOBAL CCTV NETWORK.......... OK',
-  'COMPILING POST-PROCESSING SHADERS....... OK',
-  'BUILDING TACTICAL DISPLAY OVERLAY....... OK',
-  '',
-  'ALL SYSTEMS NOMINAL',
-  '',
-  '▶ PRESS ANY KEY TO ENTER',
-];
-
-/** Pick the right sound effect based on line content. */
-function getSoundForLine(line: string): SoundEffect | null {
-  if (line === '') return null;
-  if (line.includes('WORLDVIEW')) return 'bootSweep';
-  if (line.includes('═')) return 'bootSeparator';
-  if (line.includes('NOMINAL')) return 'bootReady';
-  if (line.includes('PRESS')) return 'bootOk';
-  if (line.includes('CONNECTING')) return 'bootConnect';
-  if (line.includes('LOADING') || line.includes('COMPILING') || line.includes('BUILDING') || line.includes('INITIALISING')) return 'bootLoad';
-  return 'bootTick';
-}
-
-/** Typing speed per character for lines that use the typewriter effect. */
-const CHAR_SPEED = 12; // ms per character
-
 export default function SplashScreen({ onComplete, audio }: SplashScreenProps) {
-  const [visibleLines, setVisibleLines] = useState(0);
-  const [typedChars, setTypedChars] = useState(0); // chars revealed in the current line
+  const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
-  const soundPlayedRef = useRef<Set<number>>(new Set());
 
-  // Current line being typed
-  const currentLine = BOOT_LINES[visibleLines] ?? '';
-  const isTypingLine = visibleLines < BOOT_LINES.length && currentLine.length > 0;
-  const isFullyTyped = typedChars >= currentLine.length;
-
-  // Play sound when a new line starts typing
+  // Simulate loading progress
   useEffect(() => {
-    if (visibleLines >= BOOT_LINES.length) return;
-    if (soundPlayedRef.current.has(visibleLines)) return;
-
-    const line = BOOT_LINES[visibleLines];
-    const sound = getSoundForLine(line);
-    if (sound) {
-      soundPlayedRef.current.add(visibleLines);
-      audio?.play(sound);
-    }
-  }, [visibleLines, audio]);
-
-  // Typewriter: reveal one character at a time for non-empty lines
-  useEffect(() => {
-    if (visibleLines >= BOOT_LINES.length) return;
-    const line = BOOT_LINES[visibleLines];
-
-    // Empty lines: advance immediately
-    if (line === '') {
-      const timer = setTimeout(() => {
-        setTypedChars(0);
-        setVisibleLines((v) => v + 1);
-      }, 80);
-      return () => clearTimeout(timer);
-    }
-
-    // Still typing the current line
-    if (typedChars < line.length) {
-      const timer = setTimeout(() => {
-        setTypedChars((c) => c + 1);
-      }, CHAR_SPEED + Math.random() * 8);
-      return () => clearTimeout(timer);
-    }
-
-    // Line fully typed — pause, then move to the next
-    const pauseMs = line.includes('NOMINAL') ? 400 : line.includes('WORLDVIEW') ? 300 : 120;
-    const timer = setTimeout(() => {
-      setTypedChars(0);
-      setVisibleLines((v) => v + 1);
-    }, pauseMs);
-    return () => clearTimeout(timer);
-  }, [visibleLines, typedChars]);
-
-  // All lines done — ready to enter
-  useEffect(() => {
-    if (visibleLines >= BOOT_LINES.length && !ready) {
+    if (progress >= 100) {
       setReady(true);
+      return;
     }
-  }, [visibleLines, ready]);
+    const speed = progress < 60 ? 40 : progress < 85 ? 80 : 120;
+    const increment = progress < 60 ? 3 : progress < 85 ? 2 : 1;
+    const timer = setTimeout(() => {
+      setProgress((p) => Math.min(100, p + increment));
+    }, speed);
+    return () => clearTimeout(timer);
+  }, [progress]);
 
+  const handleEnter = useCallback(() => {
+    if (ready) {
+      audio?.play('bootReady');
+      onComplete();
+    }
+  }, [ready, onComplete, audio]);
+
+  // Listen for any key or click to enter
   useEffect(() => {
     if (!ready) return;
-    const handler = () => onComplete();
+    const handler = () => handleEnter();
     window.addEventListener('keydown', handler);
     window.addEventListener('click', handler);
     return () => {
       window.removeEventListener('keydown', handler);
       window.removeEventListener('click', handler);
     };
-  }, [ready, onComplete]);
+  }, [ready, handleEnter]);
 
   return (
-    <div className="fixed inset-0 bg-wv-black z-[100] flex items-center justify-center">
-      <div className="w-full max-w-xl p-8">
-        {/* Fully revealed lines */}
-        {BOOT_LINES.slice(0, visibleLines).map((line, i) => (
-          <div
-            key={i}
-            className={`text-[11px] leading-relaxed ${getLineClass(line)}`}
-          >
-            {line || '\u00A0'}
-          </div>
-        ))}
+    <div className="fixed inset-0 bg-[#040608] z-[100] flex flex-col items-center justify-center select-none">
+      {/* Subtle scan lines overlay */}
+      <div className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        style={{
+          backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,136,0.1) 2px, rgba(0,255,136,0.1) 4px)',
+        }}
+      />
 
-        {/* Currently typing line */}
-        {isTypingLine && (
-          <div className={`text-[11px] leading-relaxed ${getLineClass(currentLine)}`}>
-            {currentLine.slice(0, typedChars)}
-            {/* Blinking cursor at typing position */}
-            {!isFullyTyped && (
-              <span className="inline-block w-[6px] h-[11px] bg-wv-green ml-[1px] animate-pulse align-middle" />
+      {/* Main content */}
+      <div className="relative z-10 flex flex-col items-center gap-6">
+        {/* Title */}
+        <div className="text-center">
+          <h1
+            className="text-6xl font-bold tracking-[0.3em] mb-2"
+            style={{
+              color: '#00FF88',
+              textShadow: '0 0 40px rgba(0,255,136,0.3), 0 0 80px rgba(0,255,136,0.1)',
+              fontFamily: 'monospace',
+            }}
+          >
+            GAIA
+          </h1>
+          <div
+            className="text-[11px] tracking-[0.5em] uppercase"
+            style={{ color: 'rgba(0,255,136,0.4)' }}
+          >
+            Battlefield Tactical System
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="w-72 flex flex-col items-center gap-2">
+          <div className="w-full h-[2px] bg-white/5 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-100"
+              style={{
+                width: `${progress}%`,
+                background: 'linear-gradient(90deg, rgba(0,255,136,0.6), rgba(0,255,136,0.9))',
+                boxShadow: '0 0 12px rgba(0,255,136,0.4)',
+              }}
+            />
+          </div>
+          <div className="text-[9px] tracking-[0.3em]" style={{ color: 'rgba(0,255,136,0.3)' }}>
+            {!ready ? (
+              <>INITIALIZING... {progress}%</>
+            ) : (
+              <span style={{ color: 'rgba(0,255,136,0.5)' }}>SYSTEMS READY</span>
             )}
           </div>
-        )}
+        </div>
 
-        {/* Blinking cursor on empty state */}
-        {visibleLines < BOOT_LINES.length && !isTypingLine && (
-          <span className="inline-block w-2 h-3 bg-wv-green animate-pulse" />
+        {/* Press any key prompt */}
+        {ready && (
+          <div
+            className="mt-4 text-[12px] tracking-[0.4em] uppercase animate-pulse cursor-pointer"
+            style={{
+              color: 'rgba(0,255,136,0.7)',
+              textShadow: '0 0 20px rgba(0,255,136,0.3)',
+            }}
+            onClick={handleEnter}
+          >
+            Press any key to enter
+          </div>
         )}
+      </div>
+
+      {/* Bottom version */}
+      <div
+        className="absolute bottom-4 text-[9px] tracking-[0.3em]"
+        style={{ color: 'rgba(255,255,255,0.1)' }}
+      >
+        v1.0.0
       </div>
     </div>
   );
-}
-
-function getLineClass(line: string): string {
-  if (line.includes('OK')) return 'text-wv-green';
-  if (line.includes('PRESS')) return 'text-wv-cyan glow-cyan animate-pulse';
-  if (line.includes('═')) return 'text-wv-border';
-  if (line.includes('NOMINAL')) return 'text-wv-green glow-green font-bold';
-  if (line.includes('WORLDVIEW')) return 'text-wv-cyan glow-cyan font-bold text-sm';
-  return 'text-wv-muted';
 }

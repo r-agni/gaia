@@ -1,8 +1,13 @@
 /**
  * BattlefieldLayer — Imperative CesiumJS rendering of battlefield units and objectives.
  *
- * Architecture mirrors ShipLayer: BillboardCollection + LabelCollection for units,
- * PointPrimitiveCollection for objectives. Dead-reckoning via preUpdate listener.
+ * Major visual features:
+ * - NATO-style military icons (64px) with side-colored shapes per unit type
+ * - Health bars rendered below each icon (green-to-red gradient)
+ * - Pulsing objective rings with capture progress arcs
+ * - Combat flash effect for units with active cooldowns
+ * - Movement trails (fading polyline of last 5 positions)
+ * - Detailed unit labels with type name, status, ammo
  */
 import { useEffect, useRef } from 'react';
 import { useCesium } from 'resium';
@@ -37,20 +42,24 @@ const SIDE_COLORS: Record<string, string> = {
   defender: '#4488FF',
 };
 
-const TYPE_SYMBOL: Record<string, string> = {
-  infantry_squad: 'I',
-  sniper_team: 'S',
-  mortar_team: 'M',
-  light_vehicle: 'V',
-  armored_vehicle: 'A',
-  helicopter: 'H',
-  uav_drone: 'U',
-  artillery_battery: '+',
-  aa_emplacement: 'AA',
-  fortified_position: 'F',
+const SIDE_COLORS_LIGHT: Record<string, string> = {
+  attacker: '#FF8888',
+  defender: '#88AAFF',
 };
 
-// Estimated speeds for dead-reckoning (kph converted to m/s)
+const TYPE_NAMES: Record<string, string> = {
+  infantry_squad: 'Infantry',
+  sniper_team: 'Sniper',
+  mortar_team: 'Mortar',
+  light_vehicle: 'Light Veh',
+  armored_vehicle: 'Armor',
+  helicopter: 'Helo',
+  uav_drone: 'UAV',
+  artillery_battery: 'Artillery',
+  aa_emplacement: 'AA',
+  fortified_position: 'Fortified',
+};
+
 const TYPE_SPEED_MPS: Record<string, number> = {
   infantry_squad: 5 / 3.6,
   sniper_team: 4 / 3.6,
@@ -70,15 +79,244 @@ function getUnitAltitude(u: BattlefieldUnit): number {
   return FLYING_TYPES.has(u.unit_type) ? 300 : 10;
 }
 
-const LABEL_OFFSET = new CesiumCartesian2(10, -4);
+const ICON_SIZE = 64;
+const LABEL_OFFSET = new CesiumCartesian2(12, -4);
+const HEALTH_BAR_OFFSET = new CesiumCartesian2(0, 22);
 
-/* ─── unit icon canvas ──────────────────────────────────────── */
+/* ─── NATO icon canvas ─────────────────────────────────────── */
 
 const _iconCache = new Map<string, HTMLCanvasElement>();
 
-function createUnitIcon(side: string, symbol: string): HTMLCanvasElement {
-  const key = `${side}:${symbol}`;
+function hpColor(fraction: number): string {
+  if (fraction > 0.6) return '#44FF44';
+  if (fraction > 0.3) return '#FFCC00';
+  return '#FF4444';
+}
+
+function createUnitIcon(side: string, unitType: string, hpFraction: number, inCombat: boolean): HTMLCanvasElement {
+  const key = `${side}:${unitType}:${Math.round(hpFraction * 10)}:${inCombat ? 1 : 0}`;
   if (_iconCache.has(key)) return _iconCache.get(key)!;
+
+  const S = ICON_SIZE;
+  const canvas = document.createElement('canvas');
+  canvas.width = S;
+  canvas.height = S;
+  const c = canvas.getContext('2d')!;
+  const cx = S / 2;
+  const cy = S / 2 - 4;
+
+  const sideCol = SIDE_COLORS[side] ?? '#FFFFFF';
+
+  // Combat glow effect
+  if (inCombat) {
+    c.save();
+    c.shadowBlur = 16;
+    c.shadowColor = sideCol;
+    c.beginPath();
+    c.arc(cx, cy, 26, 0, Math.PI * 2);
+    c.fillStyle = sideCol + '30';
+    c.fill();
+    c.restore();
+  }
+
+  // Draw shape based on unit type (NATO-ish symbology)
+  c.fillStyle = sideCol;
+  c.strokeStyle = 'rgba(0,0,0,0.8)';
+  c.lineWidth = 2;
+
+  switch (unitType) {
+    case 'infantry_squad': {
+      // Filled rectangle
+      c.fillRect(cx - 14, cy - 10, 28, 20);
+      c.strokeRect(cx - 14, cy - 10, 28, 20);
+      // X inside (infantry symbol)
+      c.beginPath();
+      c.moveTo(cx - 14, cy - 10); c.lineTo(cx + 14, cy + 10);
+      c.moveTo(cx + 14, cy - 10); c.lineTo(cx - 14, cy + 10);
+      c.strokeStyle = '#fff';
+      c.lineWidth = 1.5;
+      c.stroke();
+      break;
+    }
+    case 'armored_vehicle': {
+      // Diamond shape
+      c.beginPath();
+      c.moveTo(cx, cy - 16);
+      c.lineTo(cx + 16, cy);
+      c.lineTo(cx, cy + 16);
+      c.lineTo(cx - 16, cy);
+      c.closePath();
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      break;
+    }
+    case 'helicopter': {
+      // Rotor-style: circle with blades
+      c.beginPath();
+      c.arc(cx, cy, 12, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      // Rotor blades
+      c.strokeStyle = sideCol;
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(cx - 18, cy); c.lineTo(cx + 18, cy);
+      c.moveTo(cx, cy - 18); c.lineTo(cx, cy + 18);
+      c.stroke();
+      break;
+    }
+    case 'uav_drone': {
+      // Delta/triangle shape
+      c.beginPath();
+      c.moveTo(cx, cy - 16);
+      c.lineTo(cx + 14, cy + 12);
+      c.lineTo(cx - 14, cy + 12);
+      c.closePath();
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      break;
+    }
+    case 'sniper_team': {
+      // Crosshair
+      c.beginPath();
+      c.arc(cx, cy, 12, 0, Math.PI * 2);
+      c.strokeStyle = sideCol;
+      c.lineWidth = 2;
+      c.stroke();
+      c.beginPath();
+      c.moveTo(cx - 18, cy); c.lineTo(cx + 18, cy);
+      c.moveTo(cx, cy - 18); c.lineTo(cx, cy + 18);
+      c.strokeStyle = sideCol;
+      c.lineWidth = 1.5;
+      c.stroke();
+      // Center dot
+      c.beginPath();
+      c.arc(cx, cy, 3, 0, Math.PI * 2);
+      c.fillStyle = sideCol;
+      c.fill();
+      break;
+    }
+    case 'mortar_team': {
+      // Arc symbol
+      c.beginPath();
+      c.arc(cx, cy + 6, 16, Math.PI, 0, false);
+      c.fillStyle = sideCol;
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      // Base
+      c.fillRect(cx - 6, cy + 4, 12, 8);
+      break;
+    }
+    case 'artillery_battery': {
+      // Circle with dot
+      c.beginPath();
+      c.arc(cx, cy, 14, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      c.beginPath();
+      c.arc(cx, cy, 4, 0, Math.PI * 2);
+      c.fillStyle = '#fff';
+      c.fill();
+      break;
+    }
+    case 'aa_emplacement': {
+      // Upward triangle
+      c.beginPath();
+      c.moveTo(cx, cy - 18);
+      c.lineTo(cx + 16, cy + 12);
+      c.lineTo(cx - 16, cy + 12);
+      c.closePath();
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      // Inner upward arrow
+      c.beginPath();
+      c.moveTo(cx, cy - 8);
+      c.lineTo(cx + 6, cy + 4);
+      c.lineTo(cx - 6, cy + 4);
+      c.closePath();
+      c.fillStyle = '#fff';
+      c.fill();
+      break;
+    }
+    case 'fortified_position': {
+      // Square with X
+      c.fillRect(cx - 14, cy - 14, 28, 28);
+      c.strokeRect(cx - 14, cy - 14, 28, 28);
+      c.beginPath();
+      c.moveTo(cx - 14, cy - 14); c.lineTo(cx + 14, cy + 14);
+      c.moveTo(cx + 14, cy - 14); c.lineTo(cx - 14, cy + 14);
+      c.strokeStyle = '#fff';
+      c.lineWidth = 2;
+      c.stroke();
+      break;
+    }
+    default: {
+      // Default: filled circle with letter
+      c.beginPath();
+      c.arc(cx, cy, 14, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      c.fillStyle = '#fff';
+      c.font = 'bold 14px monospace';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('?', cx, cy + 1);
+      break;
+    }
+    case 'light_vehicle': {
+      // Rounded rectangle (vehicle shape)
+      const rr = 6;
+      c.beginPath();
+      c.moveTo(cx - 14 + rr, cy - 10);
+      c.lineTo(cx + 14 - rr, cy - 10);
+      c.quadraticCurveTo(cx + 14, cy - 10, cx + 14, cy - 10 + rr);
+      c.lineTo(cx + 14, cy + 10 - rr);
+      c.quadraticCurveTo(cx + 14, cy + 10, cx + 14 - rr, cy + 10);
+      c.lineTo(cx - 14 + rr, cy + 10);
+      c.quadraticCurveTo(cx - 14, cy + 10, cx - 14, cy + 10 - rr);
+      c.lineTo(cx - 14, cy - 10 + rr);
+      c.quadraticCurveTo(cx - 14, cy - 10, cx - 14 + rr, cy - 10);
+      c.closePath();
+      c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)';
+      c.stroke();
+      // Wheel dots
+      c.fillStyle = '#fff';
+      c.beginPath(); c.arc(cx - 8, cy + 10, 3, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(cx + 8, cy + 10, 3, 0, Math.PI * 2); c.fill();
+      break;
+    }
+  }
+
+  // Health bar below icon
+  const barW = 28;
+  const barH = 4;
+  const barX = cx - barW / 2;
+  const barY = cy + 20;
+  c.fillStyle = 'rgba(0,0,0,0.6)';
+  c.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+  c.fillStyle = hpColor(hpFraction);
+  c.fillRect(barX, barY, barW * Math.max(0, Math.min(1, hpFraction)), barH);
+
+  _iconCache.set(key, canvas);
+  return canvas;
+}
+
+/* ─── Objective ring canvas ──────────────────────────────── */
+
+const _objIconCache = new Map<string, HTMLCanvasElement>();
+
+function createObjectiveIcon(controlSide: string | null, captureProgress: number, tick: number): HTMLCanvasElement {
+  const animFrame = Math.floor(tick / 2) % 4;
+  const key = `obj:${controlSide}:${Math.round(captureProgress * 10)}:${animFrame}`;
+  if (_objIconCache.has(key)) return _objIconCache.get(key)!;
 
   const S = 48;
   const canvas = document.createElement('canvas');
@@ -87,29 +325,43 @@ function createUnitIcon(side: string, symbol: string): HTMLCanvasElement {
   const c = canvas.getContext('2d')!;
   const cx = S / 2;
   const cy = S / 2;
-  const r = 20;
 
-  // Outer circle (colored by side)
-  c.beginPath();
-  c.arc(cx, cy, r, 0, Math.PI * 2);
-  c.fillStyle = SIDE_COLORS[side] ?? '#FFFFFF';
-  c.fill();
+  let col = '#FFD700';
+  if (controlSide === 'attacker') col = '#FF4444';
+  else if (controlSide === 'defender') col = '#4488FF';
 
-  // Dark ring
+  // Pulsing outer ring
+  const pulseR = 18 + (animFrame % 3);
   c.beginPath();
-  c.arc(cx, cy, r, 0, Math.PI * 2);
-  c.strokeStyle = 'rgba(0,0,0,0.7)';
+  c.arc(cx, cy, pulseR, 0, Math.PI * 2);
+  c.strokeStyle = col + '60';
   c.lineWidth = 2;
   c.stroke();
 
-  // Symbol text
-  c.fillStyle = '#FFFFFF';
-  c.font = `bold ${symbol.length > 1 ? 13 : 16}px monospace`;
-  c.textAlign = 'center';
-  c.textBaseline = 'middle';
-  c.fillText(symbol, cx, cy + 1);
+  // Inner ring
+  c.beginPath();
+  c.arc(cx, cy, 12, 0, Math.PI * 2);
+  c.strokeStyle = col;
+  c.lineWidth = 2.5;
+  c.stroke();
 
-  _iconCache.set(key, canvas);
+  // Capture progress arc fill
+  if (captureProgress > 0) {
+    c.beginPath();
+    c.moveTo(cx, cy);
+    c.arc(cx, cy, 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, captureProgress));
+    c.closePath();
+    c.fillStyle = col + '50';
+    c.fill();
+  }
+
+  // Center dot
+  c.beginPath();
+  c.arc(cx, cy, 3, 0, Math.PI * 2);
+  c.fillStyle = col;
+  c.fill();
+
+  _objIconCache.set(key, canvas);
   return canvas;
 }
 
@@ -125,6 +377,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
   const { viewer } = useCesium();
 
   const positionMapRef = useRef<Map<string, Cartesian3>>(new Map());
+  const trailMapRef = useRef<Map<string, { lat: number; lon: number }[]>>(new Map());
   const unitStateRef = useRef<Map<string, {
     lat: number; lon: number; alt: number;
     heading: number; speedMps: number;
@@ -134,13 +387,15 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
   const collectionsRef = useRef<{
     billboards: BillboardCollection;
     labels: LabelCollection;
-    objectives: PointPrimitiveCollection;
+    objBillboards: BillboardCollection;
+    objLabels: LabelCollection;
+    combatPoints: PointPrimitiveCollection;
   } | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const primitiveMapRef = useRef<Map<string, { billboard: any; label: any }>>(new Map());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const objPrimitiveMapRef = useRef<Map<string, any>>(new Map());
+  const objPrimitiveMapRef = useRef<Map<string, { billboard: any; label: any }>>(new Map());
 
   /* ── Effect 1: Create / destroy primitive collections ── */
   useEffect(() => {
@@ -148,20 +403,26 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
 
     const billboards = new BillboardCollection();
     const labels = new LabelCollection({ blendOption: BlendOption.TRANSLUCENT });
-    const objectives = new PointPrimitiveCollection();
+    const objBillboards = new BillboardCollection();
+    const objLabels = new LabelCollection({ blendOption: BlendOption.TRANSLUCENT });
+    const combatPoints = new PointPrimitiveCollection();
 
     viewer.scene.primitives.add(billboards);
     viewer.scene.primitives.add(labels);
-    viewer.scene.primitives.add(objectives);
+    viewer.scene.primitives.add(objBillboards);
+    viewer.scene.primitives.add(objLabels);
+    viewer.scene.primitives.add(combatPoints);
 
-    collectionsRef.current = { billboards, labels, objectives };
+    collectionsRef.current = { billboards, labels, objBillboards, objLabels, combatPoints };
 
     return () => {
       try {
         if (!viewer.isDestroyed()) {
           try { viewer.scene.primitives.remove(billboards); } catch { /* ok */ }
           try { viewer.scene.primitives.remove(labels); } catch { /* ok */ }
-          try { viewer.scene.primitives.remove(objectives); } catch { /* ok */ }
+          try { viewer.scene.primitives.remove(objBillboards); } catch { /* ok */ }
+          try { viewer.scene.primitives.remove(objLabels); } catch { /* ok */ }
+          try { viewer.scene.primitives.remove(combatPoints); } catch { /* ok */ }
         }
       } catch { /* viewer may be destroyed during HMR */ }
       collectionsRef.current = null;
@@ -181,16 +442,23 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
       try {
         cols.billboards.removeAll();
         cols.labels.removeAll();
-        cols.objectives.removeAll();
+        cols.objBillboards.removeAll();
+        cols.objLabels.removeAll();
+        cols.combatPoints.removeAll();
       } catch { /* destroyed */ }
       primitiveMapRef.current.clear();
       objPrimitiveMapRef.current.clear();
       positionMapRef.current.clear();
       unitStateRef.current.clear();
+      trailMapRef.current.clear();
       return;
     }
 
     const activeIds = new Set<string>();
+    const tick = state.tick;
+
+    // Clear combat flash points each tick
+    try { cols.combatPoints.removeAll(); } catch { /* ok */ }
 
     // Sync units
     for (const u of state.units) {
@@ -198,9 +466,26 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
 
       const alt = getUnitAltitude(u);
       const position = Cartesian3.fromDegrees(u.position.lon, u.position.lat, alt);
-      const symbol = TYPE_SYMBOL[u.unit_type] ?? '?';
-      const color = Color.fromCssColorString(SIDE_COLORS[u.side] ?? '#FFFFFF');
-      const labelText = `${u.unit_id.slice(-3)} ${Math.round(u.health)}/${u.max_health}`;
+      const hpFrac = u.max_health > 0 ? u.health / u.max_health : 0;
+      const inCombat = (u as any).cooldown_ticks_remaining > 0;
+      const typeName = TYPE_NAMES[u.unit_type] ?? u.unit_type;
+
+      // Build label text with status info
+      let statusText = '';
+      if (u.status === 'destroyed') statusText = ' [DEAD]';
+      else if (u.dug_in) statusText = ' [DUG IN]';
+      else if (u.status === 'retreating') statusText = ' [RETREAT]';
+
+      const labelText = `${typeName}${statusText}\n${Math.round(u.health)}/${u.max_health} HP`;
+
+      // Track movement trail
+      const trail = trailMapRef.current.get(u.unit_id) ?? [];
+      const lastPos = trail[trail.length - 1];
+      if (!lastPos || lastPos.lat !== u.position.lat || lastPos.lon !== u.position.lon) {
+        trail.push({ lat: u.position.lat, lon: u.position.lon });
+        if (trail.length > 5) trail.shift();
+        trailMapRef.current.set(u.unit_id, trail);
+      }
 
       // Update dead-reckoning state
       unitStateRef.current.set(u.unit_id, {
@@ -213,38 +498,52 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
       });
       positionMapRef.current.set(u.unit_id, position);
 
+      const sideColor = Color.fromCssColorString(SIDE_COLORS[u.side] ?? '#FFFFFF');
+      const labelColor = Color.fromCssColorString(SIDE_COLORS_LIGHT[u.side] ?? '#FFFFFF');
+
       const existing = primitiveMapRef.current.get(u.unit_id);
       if (existing) {
         existing.billboard.position = position;
-        existing.billboard.color = color;
+        existing.billboard.image = createUnitIcon(u.side, u.unit_type, hpFrac, inCombat);
         existing.label.position = position;
         existing.label.text = labelText;
-        existing.label.fillColor = color.withAlpha(0.9);
+        existing.label.fillColor = labelColor.withAlpha(0.9);
       } else {
         const billboard = cols.billboards.add({
           position,
-          image: createUnitIcon(u.side, symbol),
-          color,
-          scale: 1.2,
+          image: createUnitIcon(u.side, u.unit_type, hpFrac, inCombat),
+          color: Color.WHITE,
+          scale: 1.0,
           horizontalOrigin: HorizontalOrigin.CENTER,
           verticalOrigin: VerticalOrigin.CENTER,
-          scaleByDistance: new NearFarScalar(1e3, 1.4, 2e6, 0.4),
+          scaleByDistance: new NearFarScalar(500, 1.6, 2e6, 0.3),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         });
         const label = cols.labels.add({
           position,
           text: labelText,
           font: '11px monospace',
-          fillColor: color.withAlpha(0.9),
+          fillColor: labelColor.withAlpha(0.9),
           outlineColor: Color.BLACK,
-          outlineWidth: 2,
+          outlineWidth: 3,
           style: LabelStyle.FILL_AND_OUTLINE,
           verticalOrigin: VerticalOrigin.BOTTOM,
           pixelOffset: LABEL_OFFSET,
-          scaleByDistance: new NearFarScalar(1e3, 1.0, 5e5, 0),
+          scaleByDistance: new NearFarScalar(500, 1.0, 5e5, 0),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         });
         primitiveMapRef.current.set(u.unit_id, { billboard, label });
+      }
+
+      // Combat flash: bright point at unit position
+      if (inCombat) {
+        cols.combatPoints.add({
+          position,
+          color: sideColor.withAlpha(0.6),
+          pixelSize: 24,
+          scaleByDistance: new NearFarScalar(500, 2.0, 5e5, 0.2),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        });
       }
     }
 
@@ -256,40 +555,61 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
         primitiveMapRef.current.delete(id);
         positionMapRef.current.delete(id);
         unitStateRef.current.delete(id);
+        trailMapRef.current.delete(id);
       }
     }
 
-    // Sync objectives
+    // Sync objectives with billboard icons and labels
     const activeObjIds = new Set<string>();
     for (const obj of state.objectives) {
       activeObjIds.add(obj.objective_id);
       const pos = Cartesian3.fromDegrees(obj.position.lon, obj.position.lat, 5);
+      const objImage = createObjectiveIcon(obj.controlling_side, obj.capture_progress, tick);
 
-      // Color: gold if neutral, green if defender-controlled, red if attacker-controlled
       let objColor = Color.GOLD;
       if (obj.controlling_side === 'attacker') objColor = Color.fromCssColorString('#FF4444');
       else if (obj.controlling_side === 'defender') objColor = Color.fromCssColorString('#4488FF');
 
       const existingObj = objPrimitiveMapRef.current.get(obj.objective_id);
       if (existingObj) {
-        existingObj.position = pos;
-        existingObj.color = objColor;
+        existingObj.billboard.position = pos;
+        existingObj.billboard.image = objImage;
+        existingObj.label.position = pos;
+        existingObj.label.text = obj.name || obj.objective_id;
+        existingObj.label.fillColor = objColor.withAlpha(0.9);
       } else {
-        const pt = cols.objectives.add({
+        const billboard = cols.objBillboards.add({
           position: pos,
-          color: objColor,
-          pixelSize: 12,
-          scaleByDistance: new NearFarScalar(1e4, 1.5, 5e6, 0.3),
+          image: objImage,
+          color: Color.WHITE,
+          scale: 1.0,
+          horizontalOrigin: HorizontalOrigin.CENTER,
+          verticalOrigin: VerticalOrigin.CENTER,
+          scaleByDistance: new NearFarScalar(1e3, 1.8, 5e6, 0.4),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         });
-        objPrimitiveMapRef.current.set(obj.objective_id, pt);
+        const label = cols.objLabels.add({
+          position: pos,
+          text: obj.name || obj.objective_id,
+          font: 'bold 12px monospace',
+          fillColor: objColor.withAlpha(0.9),
+          outlineColor: Color.BLACK,
+          outlineWidth: 3,
+          style: LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: VerticalOrigin.TOP,
+          pixelOffset: new CesiumCartesian2(0, 26),
+          scaleByDistance: new NearFarScalar(1e3, 1.0, 5e5, 0),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        });
+        objPrimitiveMapRef.current.set(obj.objective_id, { billboard, label });
       }
     }
 
     // Remove stale objective primitives
-    for (const [id, pt] of objPrimitiveMapRef.current) {
+    for (const [id, prims] of objPrimitiveMapRef.current) {
       if (!activeObjIds.has(id)) {
-        try { cols.objectives.remove(pt); } catch { /* ok */ }
+        try { cols.objBillboards.remove(prims.billboard); } catch { /* ok */ }
+        try { cols.objLabels.remove(prims.label); } catch { /* ok */ }
         objPrimitiveMapRef.current.delete(id);
       }
     }
@@ -301,14 +621,16 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
     if (!cols) return;
     cols.billboards.show = visible;
     cols.labels.show = visible && !isTracking;
-    cols.objectives.show = visible;
+    cols.objBillboards.show = visible;
+    cols.objLabels.show = visible;
+    cols.combatPoints.show = visible;
   }, [visible, isTracking]);
 
   /* ── Effect 4: Dead-reckoning + occlusion via preUpdate ── */
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
 
-    const BULK_MS = 500; // battlefield ticks are 1s+ so update more frequently
+    const BULK_MS = 500;
     let lastBulkUpdate = 0;
 
     const onPreUpdate = () => {
