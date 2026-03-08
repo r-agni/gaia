@@ -1,11 +1,19 @@
-# Use Python base (has Python 3), install Node.js without apt
-FROM python:3.11-slim-bookworm
+# Stage 1: build Worldview (React + Vite)
+FROM node:20-bookworm-slim AS worldview-build
+WORKDIR /worldview
+COPY worldview/package.json worldview/package-lock.json ./
+RUN npm ci
+COPY worldview/ ./
+# CesiumJS is large; raise Node heap to avoid OOM during Vite build
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
+
+# Stage 2: runtime (Node + Python in one image)
+FROM node:20-bookworm-slim AS runtime
 
 # HF Spaces requires uid 1000
 RUN useradd -m -u 1000 user
 
-# Install Node.js 20 via NodeSource (single apt-get call)
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash -     && apt-get install -y nodejs     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends     python3 python3-pip python3-venv     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/user/app
 
@@ -14,12 +22,12 @@ COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
 COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
 COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
-RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir -e ".[agents]"
+RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
-COPY --chown=user worldview/dist /home/user/app/worldview/dist
+COPY --chown=user --from=worldview-build /worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
-COPY --chown=user worldview/package.hf.json /home/user/app/worldview/package.json
-RUN cd /home/user/app/worldview && npm install --no-audit --no-fund
+COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/app/worldview/
+RUN cd /home/user/app/worldview && npm ci --omit=dev
 
 COPY --chown=user scripts/start.sh /home/user/app/start.sh
 RUN chmod +x /home/user/app/start.sh
