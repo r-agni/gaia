@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/agni_/Documents/gaia/**)",
+      "Bash(find /c/Users/agni_/Documents/gaia/battlefield_env/tests -name \"*.py\" -type f -exec wc -l {} +)",
+      "Bash(ls \"c:\\\\Users\\\\agni_\\\\Documents\\\\gaia\\\\worldview\\\\src\\\\components\\\\layers\"\" && ls \"c:Usersagni_Documentsgaiaworldviewsrccomponentsui\"\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\agni_\\Documents\\gaia\\geoguess_env\\geoguess",
+      "C:\\Users\\agni_\\Documents\\gaia\\geoguess_env\\geoguess\\tool_providers",
+      "C:\\Users\\agni_\\Documents\\gaia\\geoguess_env"
+    ]
+  }
+}

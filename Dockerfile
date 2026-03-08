@@ -14,17 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Battlefield (Python FastAPI)
-COPY battlefield_env/pyproject.toml /app/battlefield_env/
-COPY battlefield_env/battlefield /app/battlefield_env/battlefield
-COPY battlefield_env/agents /app/battlefield_env/agents
-COPY battlefield_env/client /app/battlefield_env/client
-COPY battlefield_env/scripts /app/battlefield_env/scripts
+# GeoGuess env (Python FastAPI)
+COPY geoguess_env/pyproject.toml /app/geoguess_env/
+COPY geoguess_env/geoguess /app/geoguess_env/geoguess
+COPY geoguess_env/agents /app/geoguess_env/agents
+COPY geoguess_env/client /app/geoguess_env/client
+COPY geoguess_env/data /app/geoguess_env/data
 ARG INSTALL_TRAINING=false
 RUN if [ "$INSTALL_TRAINING" = "true" ]; then \
-      cd /app/battlefield_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \
+      cd /app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \
     else \
-      cd /app/battlefield_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"; \
+      cd /app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"; \
     fi
 
 # Worldview (Node server + built static)
@@ -35,7 +35,7 @@ RUN cd /app/worldview && npm ci --omit=dev
 
 ENV NODE_ENV=production
 ENV PORT=3001
-ENV BATTLEFIELD_API=http://127.0.0.1:8001
+ENV GEOGUESS_API=http://127.0.0.1:8002
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 3001
