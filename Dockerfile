@@ -15,11 +15,9 @@ RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-
 
 COPY --chown=user worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
-COPY --chown=user worldview/package.json /home/user/app/worldview/package.json
-
-# Explicitly print npm version and try install with verbose output to see the error
-RUN node --version && npm --version
-RUN cd /home/user/app/worldview && npm install --omit=dev --no-audit --no-fund 2>&1 || (echo "NPM INSTALL FAILED" && cat npm-debug.log 2>/dev/null && exit 1)
+# Use minimal package.json with only server runtime deps
+COPY --chown=user worldview/package.hf.json /home/user/app/worldview/package.json
+RUN cd /home/user/app/worldview && npm install --no-audit --no-fund
 
 COPY --chown=user scripts/start.sh /home/user/app/start.sh
 RUN chmod +x /home/user/app/start.sh
