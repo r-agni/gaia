@@ -1,105 +1,109 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import MobileModal from './MobileModal';
 
 interface IntelFeedItem {
   id: string;
   time: string;
-  type: 'flight' | 'seismic' | 'satellite' | 'system' | 'cctv' | 'ship' | 'battle';
+  type: 'battle' | 'system';
   message: string;
 }
-
-const TYPE_STYLES: Record<string, string> = {
-  flight: 'text-wv-cyan',
-  seismic: 'text-wv-amber',
-  satellite: 'text-wv-green',
-  system: 'text-wv-muted',
-  cctv: 'text-wv-red',
-  ship: 'text-wv-cyan',
-  battle: 'text-wv-red',
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  flight: 'ACFT',
-  seismic: 'SEIS',
-  satellite: 'SATS',
-  system: 'SYS ',
-  cctv: 'CCTV',
-  ship: 'AIS ',
-  battle: 'BTL ',
-};
 
 interface IntelFeedProps {
   items: IntelFeedItem[];
   isMobile?: boolean;
 }
 
-export default function IntelFeed({ items, isMobile = false }: IntelFeedProps) {
+function IntelFeed({ items, isMobile = false }: IntelFeedProps) {
   const [visible, setVisible] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Bootstrap message on mount
   const [bootMessages] = useState<IntelFeedItem[]>([
     {
       id: 'boot-1',
       time: new Date().toISOString().slice(11, 19),
       type: 'system',
-      message: 'WORLDVIEW v1.0.0 INITIALISING...',
+      message: 'GAIA Battlefield System online',
     },
     {
       id: 'boot-2',
       time: new Date().toISOString().slice(11, 19),
       type: 'system',
-      message: 'CESIUM 3D ENGINE LOADED',
+      message: 'Cesium 3D engine loaded',
     },
     {
       id: 'boot-3',
       time: new Date().toISOString().slice(11, 19),
       type: 'system',
-      message: 'GOOGLE 3D TILES CONNECTED',
-    },
-    {
-      id: 'boot-4',
-      time: new Date().toISOString().slice(11, 19),
-      type: 'system',
-      message: 'TACTICAL DISPLAY ONLINE',
+      message: 'Tactical display ready',
     },
   ]);
 
-  const allItems = [...bootMessages, ...items].slice(-20);
-
-  // Count non-system items as "unread" for the mobile badge
+  const allItems = [...bootMessages, ...items].slice(-30);
   const liveCount = items.filter((i) => i.type !== 'system').length;
 
+  const panelStyle: React.CSSProperties = {
+    background: '#161b27',
+    border: '1px solid #252d3d',
+    borderLeft: '2px solid #E8A045',
+    borderRadius: 4,
+  };
+
   const feedList = (
-    <div className={isMobile ? 'p-3' : 'max-h-64 overflow-y-auto p-2'}>
+    <div style={{ maxHeight: isMobile ? undefined : 280, overflowY: 'auto', padding: '6px 0' }}>
       {allItems.map((item) => (
-        <div key={item.id} className={`flex gap-2 py-0.5 text-[9px] leading-tight ${isMobile ? 'py-1.5 text-[11px]' : ''}`}>
-          <span className="text-wv-muted shrink-0">{item.time}</span>
-          <span className={`shrink-0 font-bold ${TYPE_STYLES[item.type]}`}>
-            [{TYPE_LABELS[item.type]}]
+        <div
+          key={item.id}
+          style={{
+            display: 'flex',
+            gap: 8,
+            padding: '3px 12px',
+            fontSize: 11,
+            lineHeight: 1.5,
+          }}
+        >
+          <span style={{ color: '#2e3848', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+            {item.time}
           </span>
-          <span className="text-wv-text/80">{item.message}</span>
+          <span
+            style={{
+              color: item.type === 'battle' ? '#D64045' : '#5a6478',
+              flexShrink: 0,
+              fontWeight: 600,
+              minWidth: 28,
+            }}
+          >
+            {item.type === 'battle' ? 'BTL' : 'SYS'}
+          </span>
+          <span style={{ color: '#d4dbe8' }}>{item.message}</span>
         </div>
       ))}
     </div>
   );
 
-  /* ── Mobile: badge button + full-screen modal ── */
   if (isMobile) {
     return (
       <>
         <button
           onClick={() => setMobileOpen(true)}
-          className="fixed top-3 right-3 z-40 w-11 h-11 rounded-lg panel-glass
-                     flex items-center justify-center
-                     text-wv-cyan hover:bg-white/10 transition-colors
-                     select-none active:scale-95"
+          style={{
+            position: 'fixed', top: 12, right: 12, zIndex: 40,
+            width: 44, height: 44, borderRadius: 6,
+            background: '#161b27', border: '1px solid #252d3d',
+            borderLeft: '2px solid #E8A045',
+            color: '#E8A045', fontSize: 16, cursor: 'pointer',
+          }}
           aria-label="Open intel feed"
         >
-          <span className="text-lg">📡</span>
+          📡
           {liveCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-wv-cyan
-                             text-[8px] text-wv-black font-bold flex items-center justify-center px-0.5">
+            <span style={{
+              position: 'absolute', top: -4, right: -4,
+              minWidth: 16, height: 16, borderRadius: '50%',
+              background: '#E8A045', color: '#0f1117',
+              fontSize: 9, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 2px',
+            }}>
               {liveCount > 99 ? '99+' : liveCount}
             </span>
           )}
@@ -107,9 +111,9 @@ export default function IntelFeed({ items, isMobile = false }: IntelFeedProps) {
         <MobileModal
           open={mobileOpen}
           onClose={() => setMobileOpen(false)}
-          title="Intel Feed"
+          title="Combat Log"
           icon="📡"
-          accent="bg-wv-cyan"
+          accent="bg-wv-amber"
         >
           {feedList}
         </MobileModal>
@@ -117,23 +121,41 @@ export default function IntelFeed({ items, isMobile = false }: IntelFeedProps) {
     );
   }
 
-  /* ── Desktop: fixed side panel (unchanged) ── */
   return (
-    <div className="fixed top-4 right-4 w-72 panel-glass rounded-lg overflow-hidden z-40 select-none">
+    <div style={{ position: 'fixed', bottom: 48, right: 16, width: 280, zIndex: 40, ...panelStyle }}>
       {/* Header */}
       <div
-        className="px-3 py-2 border-b border-wv-border flex items-center justify-between cursor-pointer"
+        style={{
+          padding: '7px 12px',
+          borderBottom: '1px solid #252d3d',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+        }}
         onClick={() => setVisible(!visible)}
       >
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-wv-cyan animate-pulse" />
-          <span className="text-[10px] text-wv-muted tracking-widest uppercase">Intel Feed</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#E8A045', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            Log
+          </span>
+          {liveCount > 0 && (
+            <span style={{
+              padding: '1px 5px', borderRadius: 3,
+              background: '#E8A04520', color: '#E8A045',
+              fontSize: 9, fontWeight: 700,
+            }}>
+              {liveCount}
+            </span>
+          )}
         </div>
-        <span className="text-[10px] text-wv-muted">{visible ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 10, color: '#5a6478' }}>{visible ? '▲' : '▼'}</span>
       </div>
+
       {visible && feedList}
     </div>
   );
 }
 
+export default memo(IntelFeed);
 export type { IntelFeedItem };

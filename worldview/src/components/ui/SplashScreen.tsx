@@ -1,156 +1,115 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { AudioControls } from '../../hooks/useAudio';
-import type { SoundEffect } from '../../lib/audio';
 
 interface SplashScreenProps {
   onComplete: () => void;
   audio?: AudioControls;
 }
 
-const BOOT_LINES = [
-  'WORLDVIEW TACTICAL INTELLIGENCE SYSTEM',
-  '═════════════════════════════════════',
-  '',
-  'INITIALISING CESIUM 3D ENGINE............ OK',
-  'LOADING GOOGLE PHOTOREALISTIC 3D TILES.. OK',
-  'CONNECTING OPENSKY NETWORK.............. OK',
-  'LOADING CELESTRAK SATELLITE DATA........ OK',
-  'CONNECTING USGS SEISMIC FEED............ OK',
-  'CONNECTING GLOBAL CCTV NETWORK.......... OK',
-  'COMPILING POST-PROCESSING SHADERS....... OK',
-  'BUILDING TACTICAL DISPLAY OVERLAY....... OK',
-  '',
-  'ALL SYSTEMS NOMINAL',
-  '',
-  '▶ PRESS ANY KEY TO ENTER',
-];
-
-/** Pick the right sound effect based on line content. */
-function getSoundForLine(line: string): SoundEffect | null {
-  if (line === '') return null;
-  if (line.includes('WORLDVIEW')) return 'bootSweep';
-  if (line.includes('═')) return 'bootSeparator';
-  if (line.includes('NOMINAL')) return 'bootReady';
-  if (line.includes('PRESS')) return 'bootOk';
-  if (line.includes('CONNECTING')) return 'bootConnect';
-  if (line.includes('LOADING') || line.includes('COMPILING') || line.includes('BUILDING') || line.includes('INITIALISING')) return 'bootLoad';
-  return 'bootTick';
-}
-
-/** Typing speed per character for lines that use the typewriter effect. */
-const CHAR_SPEED = 12; // ms per character
-
 export default function SplashScreen({ onComplete, audio }: SplashScreenProps) {
-  const [visibleLines, setVisibleLines] = useState(0);
-  const [typedChars, setTypedChars] = useState(0); // chars revealed in the current line
+  const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
-  const soundPlayedRef = useRef<Set<number>>(new Set());
+  const [mounted, setMounted] = useState(false);
 
-  // Current line being typed
-  const currentLine = BOOT_LINES[visibleLines] ?? '';
-  const isTypingLine = visibleLines < BOOT_LINES.length && currentLine.length > 0;
-  const isFullyTyped = typedChars >= currentLine.length;
-
-  // Play sound when a new line starts typing
   useEffect(() => {
-    if (visibleLines >= BOOT_LINES.length) return;
-    if (soundPlayedRef.current.has(visibleLines)) return;
+    setMounted(true);
+  }, []);
 
-    const line = BOOT_LINES[visibleLines];
-    const sound = getSoundForLine(line);
-    if (sound) {
-      soundPlayedRef.current.add(visibleLines);
-      audio?.play(sound);
-    }
-  }, [visibleLines, audio]);
-
-  // Typewriter: reveal one character at a time for non-empty lines
   useEffect(() => {
-    if (visibleLines >= BOOT_LINES.length) return;
-    const line = BOOT_LINES[visibleLines];
-
-    // Empty lines: advance immediately
-    if (line === '') {
-      const timer = setTimeout(() => {
-        setTypedChars(0);
-        setVisibleLines((v) => v + 1);
-      }, 80);
-      return () => clearTimeout(timer);
-    }
-
-    // Still typing the current line
-    if (typedChars < line.length) {
-      const timer = setTimeout(() => {
-        setTypedChars((c) => c + 1);
-      }, CHAR_SPEED + Math.random() * 8);
-      return () => clearTimeout(timer);
-    }
-
-    // Line fully typed — pause, then move to the next
-    const pauseMs = line.includes('NOMINAL') ? 400 : line.includes('WORLDVIEW') ? 300 : 120;
-    const timer = setTimeout(() => {
-      setTypedChars(0);
-      setVisibleLines((v) => v + 1);
-    }, pauseMs);
-    return () => clearTimeout(timer);
-  }, [visibleLines, typedChars]);
-
-  // All lines done — ready to enter
-  useEffect(() => {
-    if (visibleLines >= BOOT_LINES.length && !ready) {
+    if (progress >= 100) {
       setReady(true);
+      return;
     }
-  }, [visibleLines, ready]);
+    const speed = progress < 60 ? 40 : progress < 85 ? 80 : 120;
+    const increment = progress < 60 ? 3 : progress < 85 ? 2 : 1;
+    const timer = setTimeout(() => {
+      setProgress((p) => Math.min(100, p + increment));
+    }, speed);
+    return () => clearTimeout(timer);
+  }, [progress]);
+
+  const handleEnter = useCallback(() => {
+    if (ready) {
+      audio?.play('bootReady');
+      onComplete();
+    }
+  }, [ready, onComplete, audio]);
 
   useEffect(() => {
     if (!ready) return;
-    const handler = () => onComplete();
+    const handler = () => handleEnter();
     window.addEventListener('keydown', handler);
     window.addEventListener('click', handler);
     return () => {
       window.removeEventListener('keydown', handler);
       window.removeEventListener('click', handler);
     };
-  }, [ready, onComplete]);
+  }, [ready, handleEnter]);
 
   return (
-    <div className="fixed inset-0 bg-wv-black z-[100] flex items-center justify-center">
-      <div className="w-full max-w-xl p-8">
-        {/* Fully revealed lines */}
-        {BOOT_LINES.slice(0, visibleLines).map((line, i) => (
-          <div
-            key={i}
-            className={`text-[11px] leading-relaxed ${getLineClass(line)}`}
-          >
-            {line || '\u00A0'}
-          </div>
-        ))}
+    <div
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center select-none"
+      style={{
+        background: '#0f1117',
+        opacity: mounted ? 1 : 0,
+        transition: 'opacity 0.4s ease',
+      }}
+    >
+      <div className="flex flex-col items-center" style={{ gap: 20 }}>
+        {/* Wordmark */}
+        <h1
+          style={{
+            fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+            fontSize: '3.5rem',
+            fontWeight: 200,
+            letterSpacing: '0.55em',
+            color: '#d4dbe8',
+            margin: 0,
+            lineHeight: 1,
+          }}
+        >
+          GAIA
+        </h1>
 
-        {/* Currently typing line */}
-        {isTypingLine && (
-          <div className={`text-[11px] leading-relaxed ${getLineClass(currentLine)}`}>
-            {currentLine.slice(0, typedChars)}
-            {/* Blinking cursor at typing position */}
-            {!isFullyTyped && (
-              <span className="inline-block w-[6px] h-[11px] bg-wv-green ml-[1px] animate-pulse align-middle" />
-            )}
-          </div>
-        )}
+        {/* Horizontal rule */}
+        <div style={{ width: 260, height: 1, background: '#252d3d' }} />
 
-        {/* Blinking cursor on empty state */}
-        {visibleLines < BOOT_LINES.length && !isTypingLine && (
-          <span className="inline-block w-2 h-3 bg-wv-green animate-pulse" />
-        )}
+        {/* Subtitle */}
+        <div
+          style={{
+            fontSize: 11,
+            letterSpacing: '0.18em',
+            color: '#5a6478',
+            textTransform: 'uppercase',
+          }}
+        >
+          Battlefield System
+        </div>
+
+        {/* Progress counter */}
+        <div style={{ height: 20, display: 'flex', alignItems: 'center' }}>
+          {!ready ? (
+            <span style={{ fontSize: 12, color: '#E8A045', letterSpacing: '0.1em' }}>
+              {progress}%
+            </span>
+          ) : (
+            <span
+              style={{ fontSize: 12, color: '#5a6478', letterSpacing: '0.15em', cursor: 'pointer' }}
+              onClick={handleEnter}
+            >
+              Press any key to continue
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Version — bottom left */}
+      <div
+        className="absolute bottom-4 left-4"
+        style={{ fontSize: 10, color: '#2e3848', letterSpacing: '0.08em' }}
+      >
+        v1.0.0
       </div>
     </div>
   );
-}
-
-function getLineClass(line: string): string {
-  if (line.includes('OK')) return 'text-wv-green';
-  if (line.includes('PRESS')) return 'text-wv-cyan glow-cyan animate-pulse';
-  if (line.includes('═')) return 'text-wv-border';
-  if (line.includes('NOMINAL')) return 'text-wv-green glow-green font-bold';
-  if (line.includes('WORLDVIEW')) return 'text-wv-cyan glow-cyan font-bold text-sm';
-  return 'text-wv-muted';
 }
