@@ -6,10 +6,10 @@ cd /app/geoguess_env && PYTHONPATH=/app/geoguess_env uvicorn geoguess.server:app
 # Auto-start training loop once the Python server is ready
 (
   for i in $(seq 1 30); do
-    if curl -sf http://127.0.0.1:8002/health > /dev/null 2>&1; then
-      curl -s -X POST http://127.0.0.1:8002/auto_play/start \
-        -H 'Content-Type: application/json' \
-        -d '{"use_llm":false,"step_delay_ms":300}'
+    if wget -qO /dev/null http://127.0.0.1:8002/health 2>/dev/null; then
+      wget -qO- --post-data='{"use_llm":false,"step_delay_ms":300}' \
+        --header='Content-Type: application/json' \
+        http://127.0.0.1:8002/auto_play/start || true
       echo "auto_play started"
       break
     fi
