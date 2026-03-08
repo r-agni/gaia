@@ -6,6 +6,9 @@ APP_ROOT="$(cd "$(dirname "$0")" && pwd)"
 TRAINING_STATUS_FILE="${TRAINING_STATUS_FILE:-/tmp/gaia_training_status.json}"
 TRAINING_LOG_FILE="${TRAINING_LOG_FILE:-/tmp/gaia_train_grpo.log}"
 VLLM_LOG_FILE="${VLLM_LOG_FILE:-/tmp/gaia_vllm.log}"
+VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-240}"
+VLLM_HEALTH_SLEEP_SEC="${VLLM_HEALTH_SLEEP_SEC:-5}"
+ALLOW_TRAINING_FALLBACK_NO_VLLM="${ALLOW_TRAINING_FALLBACK_NO_VLLM:-true}"
 
 write_training_status() {
   state="$1"
@@ -56,9 +59,15 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       write_training_status "starting_vllm" "Launching vLLM server on :8000."
       python3 -m vllm.entrypoints.openai.api_server --model "$BASE_MODEL" --host 0.0.0.0 --port 8000 >"$VLLM_LOG_FILE" 2>&1 &
       VLLM_PID=$!
+      VLLM_READY=false
       write_training_status "waiting_for_vllm" "Waiting for vLLM health endpoint."
-      for i in $(seq 1 120); do
+      for i in $(seq 1 "$VLLM_HEALTH_RETRIES"); do
+        if ! kill -0 "$VLLM_PID" 2>/dev/null; then
+          write_training_status "failed" "vLLM process exited before becoming healthy (see vLLM log)."
+          break
+        fi
         if wget -q -O /dev/null http://127.0.0.1:8000/health 2>/dev/null; then
+          VLLM_READY=true
           write_training_status "running_trainer" "vLLM is healthy; starting train_grpo.py."
           cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 train_grpo.py >>"$TRAINING_LOG_FILE" 2>&1
           TRAIN_EXIT=$?
@@ -69,10 +78,22 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
           fi
           break
         fi
-        sleep 5
+        sleep "$VLLM_HEALTH_SLEEP_SEC"
       done
-      if ! wget -q -O /dev/null http://127.0.0.1:8000/health 2>/dev/null; then
-        write_training_status "failed" "vLLM did not become healthy in time (see vLLM log)."
+      if [ "$VLLM_READY" != "true" ]; then
+        if [ "$ALLOW_TRAINING_FALLBACK_NO_VLLM" = "true" ]; then
+          write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false."
+          export USE_VLLM=false
+          cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 train_grpo.py >>"$TRAINING_LOG_FILE" 2>&1
+          TRAIN_EXIT=$?
+          if [ "$TRAIN_EXIT" -eq 0 ]; then
+            write_training_status "completed" "GRPO training completed in fallback mode (no vLLM)."
+          else
+            write_training_status "failed" "Fallback trainer exited with code $TRAIN_EXIT."
+          fi
+        else
+          write_training_status "failed" "vLLM did not become healthy in time (see vLLM log)."
+        fi
       fi
       kill "$VLLM_PID" 2>/dev/null || true
     ) &
