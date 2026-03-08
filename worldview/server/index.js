@@ -1062,6 +1062,26 @@ app.post('/api/geoguess/auto_play/stop', async (req, res) => {
   }
 });
 
+app.get('/api/geoguess/auto_play/status', async (_req, res) => {
+  try {
+    const r = await fetch(`${GEOGUESS_API}/auto_play/status`);
+    if (!r.ok) return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
+    res.json(await r.json());
+  } catch (err) {
+    res.status(503).json({ error: 'GeoGuess env not running', detail: err.message });
+  }
+});
+
+app.get('/api/geoguess/training/history', async (_req, res) => {
+  try {
+    const r = await fetch(`${GEOGUESS_API}/training/history`);
+    if (!r.ok) return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
+    res.json(await r.json());
+  } catch (err) {
+    res.status(503).json({ error: 'GeoGuess env not running', detail: err.message });
+  }
+});
+
 // ─── Production: serve built React app (static + SPA fallback) ───
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {

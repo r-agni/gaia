@@ -12,8 +12,11 @@ interface OperationsPanelProps {
   geoConnected?: boolean;
   onStartGame?: () => void;
   startGameLoading?: boolean;
+  gameInProgress?: boolean;
   startGameError?: string | null;
   onClearStartError?: () => void;
+  onToggleTrainingView?: () => void;
+  showingTrainingView?: boolean;
 }
 
 export default function OperationsPanel({
@@ -22,15 +25,19 @@ export default function OperationsPanel({
   geoConnected = false,
   onStartGame,
   startGameLoading = false,
+  gameInProgress = false,
   startGameError = null,
   onClearStartError,
-  // kept for App compatibility; Optics/Map UI removed for simplicity
+  onToggleTrainingView,
+  showingTrainingView = false,
   shaderMode: _shaderMode,
   onShaderChange: _onShaderChange,
   mapTiles: _mapTiles,
   onMapTilesChange: _onMapTilesChange,
 }: OperationsPanelProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const gameDisabled = startGameLoading || gameInProgress;
 
   const panelContent = (
     <>
@@ -45,10 +52,14 @@ export default function OperationsPanel({
         <div className="p-2 border-b border-wv-border">
           <button
             onClick={onStartGame}
-            disabled={startGameLoading}
-            className={`w-full px-3 py-2 rounded text-[11px] text-wv-green bg-wv-green/10 hover:bg-wv-green/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${isMobile ? 'min-h-[44px]' : ''}`}
+            disabled={gameDisabled}
+            className={`w-full px-3 py-2 rounded text-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${isMobile ? 'min-h-[44px]' : ''} ${
+              gameInProgress
+                ? 'text-wv-amber bg-wv-amber/10'
+                : 'text-wv-green bg-wv-green/10 hover:bg-wv-green/20'
+            }`}
           >
-            {startGameLoading ? 'Starting…' : 'Start game'}
+            {startGameLoading ? 'Starting…' : gameInProgress ? 'Game in progress' : 'Start game'}
           </button>
           {startGameError && (
             <div className="mt-1.5 flex items-start gap-1">
@@ -60,6 +71,19 @@ export default function OperationsPanel({
           )}
         </div>
       )}
+
+      <div className="p-2 border-b border-wv-border">
+        <button
+          onClick={onToggleTrainingView}
+          className={`w-full px-3 py-2 rounded text-[11px] transition-colors ${isMobile ? 'min-h-[44px]' : ''} ${
+            showingTrainingView
+              ? 'text-wv-cyan bg-wv-cyan/20'
+              : 'text-wv-cyan bg-wv-cyan/10 hover:bg-wv-cyan/20'
+          }`}
+        >
+          {showingTrainingView ? 'Back to Globe' : 'Training Results'}
+        </button>
+      </div>
 
       <div className="p-2">
         <button
@@ -103,7 +127,7 @@ export default function OperationsPanel({
   }
 
   return (
-    <div className="fixed top-4 left-4 w-40 panel-glass rounded-lg overflow-hidden z-40 select-none">
+    <div className="fixed top-4 left-4 w-44 panel-glass rounded-lg overflow-hidden z-40 select-none">
       <div className="px-3 py-2 border-b border-wv-border">
         <span className="text-[10px] text-wv-muted">Controls</span>
       </div>

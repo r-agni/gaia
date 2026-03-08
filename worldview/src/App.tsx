@@ -10,6 +10,7 @@ import Crosshair from './components/ui/Crosshair';
 import SplashScreen from './components/ui/SplashScreen';
 import GeoguessStatsPanel from './components/ui/GeoguessStatsPanel';
 import FilmGrain from './components/ui/FilmGrain';
+import TrainingResultsView from './components/ui/TrainingResultsView';
 import { useGeoguess } from './hooks/useGeoguess';
 import { useIsMobile } from './hooks/useIsMobile';
 import { useAudio } from './hooks/useAudio';
@@ -23,6 +24,7 @@ function App() {
   const [booted, setBooted] = useState(false);
   const [shaderMode, setShaderMode] = useState<ShaderMode>('none');
   const [mapTiles, setMapTiles] = useState<'google' | 'osm'>('google');
+  const [activeView, setActiveView] = useState<'globe' | 'training'>('globe');
   const [camera, setCamera] = useState({
     latitude: 0,
     longitude: 0,
@@ -31,7 +33,6 @@ function App() {
     pitch: -90,
   });
 
-  // GeoGuess state — always connected (this is the whole point of the app)
   const { state: geoState, connected: geoConnected } = useGeoguess(true);
 
   // Auto-fly to the agent's current guess location as it updates
@@ -43,7 +44,6 @@ function App() {
 
     const { current_guess_lat: lat, current_guess_lon: lon } = geoState;
 
-    // Only fly if the guess has actually changed
     const prev = lastGuessRef.current;
     if (prev && Math.abs(prev.lat - lat) < 0.0001 && Math.abs(prev.lon - lon) < 0.0001) return;
     lastGuessRef.current = { lat, lon };
@@ -118,6 +118,8 @@ function App() {
   const [startGameLoading, setStartGameLoading] = useState(false);
   const [startGameError, setStartGameError] = useState<string | null>(null);
 
+  const gameInProgress = !!(geoState && !geoState.is_terminal && geoState.episode_id);
+
   const handleStartGame = useCallback(async () => {
     setStartGameError(null);
     setStartGameLoading(true);
@@ -139,31 +141,55 @@ function App() {
         }
         setStartGameError(msg);
       }
-    } catch (e) {
-      setStartGameError('Network error. Start the worldview server (port 3001) and GeoGuess server (port 8002).');
+    } catch {
+      setStartGameError('Network error — are both servers running?');
     } finally {
       setStartGameLoading(false);
     }
   }, []);
 
+  const handleToggleTrainingView = useCallback(() => {
+    audio.play('click');
+    setActiveView(v => v === 'globe' ? 'training' : 'globe');
+  }, [audio]);
+
   if (!booted) {
     return <SplashScreen onComplete={handleBootComplete} audio={audio} />;
   }
+
+  const showingTrainingView = activeView === 'training';
 
   return (
     <div className="w-screen h-screen bg-wv-black overflow-hidden">
       <FilmGrain opacity={0.04} />
 
-      <GlobeViewer
-        shaderMode={shaderMode}
-        mapTiles={mapTiles}
-        onCameraChange={handleCameraChange}
-        onViewerReady={handleViewerReady}
-      >
-        <GeoguessLayer state={geoState} visible={true} />
-      </GlobeViewer>
+      {!showingTrainingView && (
+        <>
+          <GlobeViewer
+            shaderMode={shaderMode}
+            mapTiles={mapTiles}
+            onCameraChange={handleCameraChange}
+            onViewerReady={handleViewerReady}
+          >
+            <GeoguessLayer state={geoState} visible={true} />
+          </GlobeViewer>
 
-      <Crosshair />
+          <Crosshair />
+
+          <GeoSidebar state={geoState} connected={geoConnected} isMobile={isMobile} />
+          <GeoguessStatsPanel state={geoState} visible={true} />
+
+          <StatusBar
+            camera={camera}
+            shaderMode={shaderMode}
+            isMobile={isMobile}
+          />
+        </>
+      )}
+
+      {showingTrainingView && (
+        <TrainingResultsView onClose={() => setActiveView('globe')} />
+      )}
 
       <OperationsPanel
         shaderMode={shaderMode}
@@ -173,20 +199,13 @@ function App() {
         onResetView={() => { audio.play('click'); handleResetView(); }}
         onStartGame={() => { audio.play('click'); handleStartGame(); }}
         startGameLoading={startGameLoading}
+        gameInProgress={gameInProgress}
         startGameError={startGameError}
         onClearStartError={() => setStartGameError(null)}
+        onToggleTrainingView={handleToggleTrainingView}
+        showingTrainingView={showingTrainingView}
         isMobile={isMobile}
         geoConnected={geoConnected}
-      />
-
-      <GeoSidebar state={geoState} connected={geoConnected} isMobile={isMobile} />
-
-      <GeoguessStatsPanel state={geoState} visible={true} />
-
-      <StatusBar
-        camera={camera}
-        shaderMode={shaderMode}
-        isMobile={isMobile}
       />
 
       <AudioToggle muted={audio.muted} onToggle={audio.toggleMute} isMobile={isMobile} />

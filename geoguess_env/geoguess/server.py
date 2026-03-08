@@ -17,6 +17,7 @@ Custom routes:
   POST /auto_play/stop    -- stop background loop
   GET  /auto_play/status  -- {running, round, episode}
   GET  /training/status   -- {episode, round, training_mode}
+  GET  /training/history  -- accumulated episode history for results view
   WS   /ws/geoguess       -- Cesium frontend real-time stream
 """
 from __future__ import annotations
@@ -24,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -54,6 +56,8 @@ _engine: Optional[GeoGuessEngine] = None
 _ws_connections: set[WebSocket] = set()
 _training_episode: int = 0
 _auto_play_task: Optional[asyncio.Task] = None
+_episode_history: list[dict] = []
+_MAX_HISTORY = 500
 
 
 def _serialize_full_state() -> dict:
@@ -161,6 +165,15 @@ async def training_status():
     }
 
 
+@app.get("/training/history")
+async def training_history():
+    """Return accumulated episode history for the training results view."""
+    return {
+        "episodes": _episode_history,
+        "total_episodes": len(_episode_history),
+    }
+
+
 @app.get("/oversight/summary")
 async def oversight_summary():
     """Return the oversight agent's current episode summary."""
@@ -234,6 +247,27 @@ async def _run_game_impl(req: RunGameRequest):
 
     await _broadcast({"type": "episode_end", **engine.get_full_state_dict()})
 
+    # Record episode in history
+    final = engine.get_full_state_dict()
+    distances = []
+    for rh in final.get("round_history", []):
+        d = rh.get("distance_km")
+        if d is not None:
+            distances.append(d)
+    _episode_history.append({
+        "episode_id": final.get("episode_id", ""),
+        "episode_number": len(_episode_history) + 1,
+        "episode_score": final.get("episode_score", 0),
+        "total_rounds": final.get("total_rounds", 0),
+        "avg_distance_km": round(sum(distances) / len(distances), 1) if distances else None,
+        "min_distance_km": round(min(distances), 1) if distances else None,
+        "rounds": final.get("round_history", []),
+        "oversight_summary": final.get("oversight_summary", {}),
+        "timestamp": time.time(),
+    })
+    if len(_episode_history) > _MAX_HISTORY:
+        _episode_history[:] = _episode_history[-_MAX_HISTORY:]
+
 
 @app.post("/run_game")
 async def run_game(req: RunGameRequest):
@@ -244,11 +278,13 @@ async def run_game(req: RunGameRequest):
 
 @app.post("/auto_play/start")
 async def auto_play_start(req: RunGameRequest):
-    global _auto_play_task
+    global _auto_play_task, _training_episode
 
     async def _loop():
+        global _training_episode
         seed = req.seed
         while True:
+            _training_episode += 1
             await _run_game_impl(RunGameRequest(
                 dataset_id=req.dataset_id,
                 total_rounds=req.total_rounds,

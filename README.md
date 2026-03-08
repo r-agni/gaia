@@ -45,10 +45,20 @@ The agent interacts with dynamic tools/APIs and must maintain consistent interna
 - **Analyst-assistant reliability scoring:** oversight agent surfaces reasoning failure modes (lazy guesses, contradictions, repeated guesses).
 - **Tradecraft training:** evaluate how evidence quality changes with tool usage strategy and budget constraints.
 
-### Other Use Cases
+### Civil and Disaster Response Use Cases
 - **Disaster response:** fast location inference from partial scene reports.
+- **Humanitarian operations:** prioritize rescue and aid routing when source data is incomplete.
+- **Crisis mapping support:** provide confidence-scored geo-estimates for incoming field reports.
+
+### Enterprise and Logistics Use Cases
 - **Supply chain and logistics:** route or site identification from environment signals.
-- **Insurance, journalism, and verification:** geolocation confidence estimation with transparent evidence trails.
+- **Asset and route verification:** detect location inconsistencies in operational reports.
+- **Field-ops support:** combine weather/terrain cues for planning in low-observability conditions.
+
+### Media, Insurance, and Verification Use Cases
+- **Insurance investigations:** cross-check claimed location context against environmental cues.
+- **Journalism and OSINT verification:** improve provenance checks for user-generated imagery.
+- **Trust and safety workflows:** flag overconfident/low-evidence geo-claims using oversight signals.
 
 ---
 
@@ -174,7 +184,47 @@ Rationale:
 
 ---
 
-## 5. RL Training Pipeline (GRPO + TRL + OpenEnv)
+## 5. Current AI Models and Approaches for Geo-Reasoning (and How GAIA Differs)
+
+### Common Current Approaches
+
+1. **Image geolocation classifiers**
+- Example family: PlaNet-style global cell classification models.
+- Strength: strong single-image prior for broad region prediction.
+- Limitation: usually weakly interpretable and less interactive.
+
+2. **Contrastive vision-language geolocalizers**
+- Example family: CLIP-style geo-alignment models (for example StreetCLIP/GeoCLIP-style methods).
+- Strength: robust zero-shot transfer and retrieval-like behavior.
+- Limitation: often optimized for static benchmark prediction rather than sequential tool use.
+
+3. **Retrieval over geotagged databases**
+- Uses nearest-neighbor matching against large geotagged corpora.
+- Strength: high precision when near-duplicate visual context exists.
+- Limitation: brittle in unseen/low-coverage regions and weak on reasoning trace quality.
+
+4. **Frontier multimodal LLMs for visual reasoning**
+- Uses general-purpose VLMs for cues like language, architecture, and terrain.
+- Strength: broad world knowledge and flexible reasoning.
+- Limitation: can be overconfident/hallucinate without explicit environment constraints.
+
+5. **Agentic tool-use pipelines**
+- Combines LLM planning with APIs/tools (weather, maps, OCR, etc.).
+- Strength: better decomposition and evidence collection than single-pass prediction.
+- Limitation: often lacks standardized RL environments and oversight-grounded evaluation loops.
+
+### How GAIA Differs
+
+- **Environment-first, not prompt-only:** GAIA is a formal OpenEnv environment with step-wise dynamics, not just a one-shot benchmark prompt.
+- **Multi-turn partial observability:** agents must plan across strict step/guess budgets with delayed outcomes.
+- **Explicit oversight agent:** contradiction, overconfidence, and evidence-quality flags are first-class outputs.
+- **Rewarded evidence strategy:** reward design balances distance accuracy, tool efficiency, and reasoning depth.
+- **Trainable with GRPO end-to-end:** same environment supports online rollouts, reward logging, and policy improvement.
+- **Demo-to-training parity:** the visualization, environment state, and RL loop all run on the same backend contracts.
+
+---
+
+## 6. RL Training Pipeline (GRPO + TRL + OpenEnv)
 
 ### Algorithm
 The main training script is `geoguess_env/train_grpo.py`, using:
@@ -206,7 +256,7 @@ Rationale:
 
 ---
 
-## 6. OpenEnv Compliance and APIs
+## 7. OpenEnv Compliance and APIs
 
 Implemented with `openenv-core>=0.2.1`.
 
@@ -231,7 +281,103 @@ Custom gameplay/ops routes:
 
 ---
 
-## 7. Frontend + Demo Layer
+## 8. OpenEnv: How We Use It in Practice
+
+GAIA uses OpenEnv as the environment protocol and lifecycle contract, not just as a library dependency.
+
+Implementation points:
+- `geoguess_env/geoguess/environment.py`
+  - `GeoGuessEnvironment` subclasses `openenv.core.Environment`
+  - `reset()`, `step()`, `state`, and metadata are implemented in OpenEnv format
+- `geoguess_env/geoguess/server.py`
+  - `HTTPEnvServer(...)` registers standard OpenEnv routes
+  - OpenEnv WebSocket endpoint (`/ws`) is used by training rollouts
+- `geoguess_env/client/env_client.py`
+  - `GeoGuessEnvClient` subclasses `openenv.core.env_client.EnvClient`
+  - used by GRPO rollout code to run episodes over OpenEnv WS
+
+Operationally:
+- Training uses OpenEnv WS (`GEOGUESS_ENV_URL=ws://...`) to reset/step/state-query episodes.
+- The Cesium demo UI uses custom REST/WS endpoints for visualization, while environment control remains OpenEnv-compliant.
+
+Why this matters:
+- We can swap agent policies while keeping environment API stable.
+- The same environment supports scripted agents, HF-inference agents, and RL rollouts without changing engine logic.
+
+---
+
+## 9. Hugging Face Models and Where They Are Used
+
+### Text Models
+- Default playing-agent model:
+  - `meta-llama/Llama-3.1-8B-Instruct`
+  - configured by `HF_MODEL_ID`
+  - used in `agents/llm_agent.py` via `agents/hf_client.py`
+
+### Vision Model
+- Default vision captioning model:
+  - `meta-llama/Llama-3.2-11B-Vision-Instruct`
+  - configured by `VISION_MODEL_ID`
+  - used in tool providers:
+    - `street_view.py` for street-level clues
+    - `terrain.py` (`globe_view`) for satellite-style clues
+
+### Training Base Model
+- Default GRPO base model:
+  - `Qwen/Qwen2.5-7B-Instruct`
+  - configured by `BASE_MODEL` in `geoguess_env/train_grpo.py`
+
+HF usage modes in GAIA:
+- Inference API mode for online agent/tool-caption calls (`HF_API_KEY` required).
+- Local/vLLM mode for high-throughput RL training.
+
+---
+
+## 10. Northflank and H100 GPU Usage
+
+Deployment notes are documented in `DEPLOY.md`.
+
+Current deployment pattern in this repo:
+- Service: `gaia-app` (combined container)
+- Process model:
+  - FastAPI GeoGuess API on internal `8002`
+  - Node/Worldview server on public `3001`
+
+How H100 is used:
+- **Primary use:** GRPO training acceleration (`trl` + vLLM + model updates)
+- **Optional use:** lower-latency LLM/vision inference during live demos
+
+Recommended split on GPU infra:
+- GPU 0: `trl vllm-serve` inference server
+- GPU 1 (or same GPU in smaller setups): GRPO trainer process
+
+Northflank specifics already captured in `DEPLOY.md`:
+- region with `h100-80` availability
+- service patch example enabling `gpuCount: 1` and `gpuType: h100-80`
+
+---
+
+## 11. Hugging Face Spaces Deployment (Docker Space)
+
+Hackathon requirement references OpenEnv on HF Spaces.  
+This repo can be deployed as a **Docker Space** using the root `Dockerfile`.
+
+Practical setup:
+- Create a new HF Space with SDK type `Docker`.
+- Point the Space to this repository.
+- Set environment variables in Space settings:
+  - `HF_API_KEY`
+  - `GOOGLE_MAPS_API_KEY` (if using Street View / Static Maps tools)
+  - optional model overrides (`HF_MODEL_ID`, `VISION_MODEL_ID`)
+- Expose app on port `3001` (container already does this).
+
+What runs in the container:
+- GeoGuess OpenEnv API (`geoguess.server:app`) bound internally to `127.0.0.1:8002`
+- Worldview server (public entrypoint) proxies to GeoGuess API
+
+---
+
+## 12. Frontend + Demo Layer
 
 `worldview/` provides:
 - Cesium globe rendering
@@ -245,7 +391,7 @@ Backend proxy (`worldview/server/index.js`) bridges UI to GeoGuess API and suppo
 
 ---
 
-## 8. Run Instructions
+## 13. Run Instructions
 
 ### Option A: Combined Container (recommended for demo)
 
@@ -281,7 +427,7 @@ Then open `http://localhost:3001`.
 
 ---
 
-## 9. Minimal Training Script Path (for Submission Requirement)
+## 14. Minimal Training Script Path (for Submission Requirement)
 
 Run from `geoguess_env/`:
 
@@ -313,7 +459,7 @@ Capture reward trends from trainer logs for the demo video.
 
 ---
 
-## 10. Judging Criteria Mapping
+## 15. Judging Criteria Mapping
 
 - **Environment Innovation (40%)**  
   Multi-tool geolocation under budget + explicit oversight agent + real-time visualization.
@@ -329,7 +475,7 @@ Capture reward trends from trainer logs for the demo video.
 
 ---
 
-## 11. Known Repository Notes
+## 16. Known Repository Notes
 
 - The active environment for this project is `geoguess_env`.
 - Some files still contain legacy `battlefield` references (not part of the GeoGuess demo path).
@@ -337,7 +483,7 @@ Capture reward trends from trainer logs for the demo video.
 
 ---
 
-## 12. Submission Checklist (Hackathon)
+## 17. Submission Checklist (Hackathon)
 
 - OpenEnv runtime: `openenv-core>=0.2.1` is used in `geoguess_env/pyproject.toml`.
 - Demo format: prepare a 1-minute technical demo video (no slide deck).
@@ -345,4 +491,7 @@ Capture reward trends from trainer logs for the demo video.
 - Partner selection to submit:
   - Fleet AI - Scalable Oversight
   - Halluminate - Multi-Actor Environments
-- Deployment: containerized via repo Dockerfile; can be deployed to HF Spaces or other container hosts.
+- Deployment:
+  - HF Spaces (Docker Space) for OpenEnv-compliant hosted demo
+  - Northflank `gaia-app` for combined UI + API runtime
+  - optional H100 for training/inference acceleration
