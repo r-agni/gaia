@@ -1140,5 +1140,24 @@ if (isDirectRun) {
 ║   Port: ${PORT}                          ║
 ╚═══════════════════════════════════════╝
     `);
+    // Fallback: start auto_play if the shell script did not (e.g. health check failed)
+    setTimeout(async () => {
+      try {
+        const statusRes = await fetch(`${GEOGUESS_API}/auto_play/status`);
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          if (!status.running) {
+            const startRes = await fetch(`${GEOGUESS_API}/auto_play/start`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ use_llm: false, step_delay_ms: 300 }),
+            });
+            if (startRes.ok) console.log('[GeoGuess] auto_play started (Node fallback)');
+          }
+        }
+      } catch (e) {
+        // GeoGuess API not up yet or unreachable
+      }
+    }, 15_000);
   });
 }

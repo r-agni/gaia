@@ -144,6 +144,12 @@ _openenv_server.register_routes(app)
 # ─── Custom REST endpoints ────────────────────────────────────────────────────
 
 
+@app.get("/health")
+async def health():
+    """Simple health check for start.sh and load balancers."""
+    return {"status": "ok"}
+
+
 @app.get("/game/state")
 async def game_state():
     """Full game state for frontend polling."""
