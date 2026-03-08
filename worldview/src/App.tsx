@@ -55,27 +55,29 @@ function App() {
     }
   }, [booted, battlefieldConnect]);
 
-  // Auto-fly to battlefield when first state arrives
+  // Fly to battlefield when first state arrives or when a new episode starts (e.g. Run Sim)
   const hasFlewToBattlefield = useRef(false);
   useEffect(() => {
     if (!battlefieldState) return;
-    if (hasFlewToBattlefield.current) return;
     const viewer = viewerRef.current;
     if (!viewer || viewer.isDestroyed()) return;
-    hasFlewToBattlefield.current = true;
-    const anchor = battlefieldState.geo_anchor;
-    const lon = anchor ? anchor.lon0 : 22.2;
-    const lat = anchor ? anchor.lat0 : 48.5;
-    viewer.trackedEntity = undefined;
-    viewer.camera.flyTo({
-      destination: Cartesian3.fromDegrees(lon, lat, 12_000),
-      orientation: {
-        heading: CesiumMath.toRadians(0),
-        pitch: CesiumMath.toRadians(-60),
-        roll: 0,
-      },
-      duration: 2,
-    });
+    const isNewEpisode = battlefieldState.tick === 0;
+    if (!hasFlewToBattlefield.current || isNewEpisode) {
+      hasFlewToBattlefield.current = true;
+      const anchor = battlefieldState.geo_anchor;
+      const lon = anchor ? anchor.lon0 : 22.2;
+      const lat = anchor ? anchor.lat0 : 48.5;
+      viewer.trackedEntity = undefined;
+      viewer.camera.flyTo({
+        destination: Cartesian3.fromDegrees(lon, lat, 12_000),
+        orientation: {
+          heading: CesiumMath.toRadians(0),
+          pitch: CesiumMath.toRadians(-60),
+          roll: 0,
+        },
+        duration: 2,
+      });
+    }
   }, [battlefieldState]);
 
   // Auto-play handlers
