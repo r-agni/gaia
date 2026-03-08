@@ -1,0 +1,287 @@
+"""
+OpenEnv-compatible FastAPI server for GeoGuessEnv.
+
+Standard OpenEnv routes (registered by HTTPEnvServer):
+  POST /reset        -- init episode, returns GeoGuessObservation
+  POST /step         -- advance one step, returns GeoGuessObservation
+  GET  /state        -- full GeoGuessFullState for visualization
+  GET  /schema       -- JSON schema for action / observation types
+  GET  /metadata     -- environment name, description, version
+  GET  /health       -- health check
+  WS   /ws           -- WebSocket session (OpenEnv EnvClient / training protocol)
+
+Custom routes:
+  GET  /datasets          -- list available location datasets
+  POST /run_game          -- run full game with LLM/rule agents, streams via WS
+  POST /auto_play/start   -- start continuous loop of games
+  POST /auto_play/stop    -- stop background loop
+  GET  /auto_play/status  -- {running, round, episode}
+  GET  /training/status   -- {episode, round, training_mode}
+  WS   /ws/geoguess       -- Cesium frontend real-time stream
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from typing import Optional
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from openenv.core.env_server.http_server import HTTPEnvServer
+
+from .engine import GeoGuessEngine
+from .environment import GeoGuessEnvironment
+from .locations import list_datasets
+from .models import GeoGuessAction, GeoGuessObservation
+
+# ─── App ─────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="GeoGuessEnv", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ─── Shared engine for custom routes ─────────────────────────────────────────
+
+_engine: Optional[GeoGuessEngine] = None
+_ws_connections: set[WebSocket] = set()
+_training_episode: int = 0
+_auto_play_task: Optional[asyncio.Task] = None
+
+
+def _serialize_full_state() -> dict:
+    if _engine is None:
+        return {}
+    return _engine.get_full_state_dict()
+
+
+async def _broadcast(msg: dict) -> None:
+    dead: set[WebSocket] = set()
+    data = json.dumps(msg)
+    for ws in list(_ws_connections):
+        try:
+            await ws.send_text(data)
+        except Exception:
+            dead.add(ws)
+    _ws_connections.difference_update(dead)
+
+
+def _schedule_broadcast(msg: dict) -> None:
+    """Fire-and-forget broadcast safe to call from synchronous contexts."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_broadcast(msg))
+        else:
+            loop.run_until_complete(_broadcast(msg))
+    except Exception:
+        pass
+
+
+# ─── Broadcasting environment (training integration) ────────────────────────
+
+
+class _BroadcastingGeoGuessEnvironment(GeoGuessEnvironment):
+    """
+    Wraps GeoGuessEnvironment so that training steps (via OpenEnv /ws)
+    are broadcast to the Cesium frontend WebSocket in real time.
+    """
+
+    def reset(self, **kwargs):
+        global _engine, _training_episode
+        _training_episode += 1
+        obs = super().reset(**kwargs)
+        _engine = self._engine
+        _schedule_broadcast({
+            "type": "episode_start",
+            "episode": _training_episode,
+            "training_mode": True,
+            **_serialize_full_state(),
+        })
+        return obs
+
+    def step(self, action, **kwargs):
+        global _engine
+        result = super().step(action, **kwargs)
+        _engine = self._engine
+        _schedule_broadcast({
+            "type": "state_update",
+            "episode": _training_episode,
+            "training_mode": True,
+            **_serialize_full_state(),
+        })
+        return result
+
+
+# ─── Register OpenEnv standard routes ────────────────────────────────────────
+
+_openenv_server = HTTPEnvServer(
+    env=_BroadcastingGeoGuessEnvironment,
+    action_cls=GeoGuessAction,
+    observation_cls=GeoGuessObservation,
+)
+_openenv_server.register_routes(app)
+
+
+# ─── Custom REST endpoints ────────────────────────────────────────────────────
+
+
+@app.get("/datasets")
+async def datasets():
+    return list_datasets()
+
+
+@app.get("/training/status")
+async def training_status():
+    state = _engine.state if _engine else None
+    return {
+        "episode": _training_episode,
+        "round": state.current_round if state else -1,
+        "training_mode": _training_episode > 0,
+    }
+
+
+class RunGameRequest(BaseModel):
+    dataset_id: str = "world_cities_5k"
+    total_rounds: int = 5
+    max_steps_per_round: int = 7
+    max_guesses_per_round: int = 2
+    step_delay_ms: int = 500
+    seed: int = 0
+    use_llm: bool = False
+
+
+@app.post("/run_game")
+async def run_game(req: RunGameRequest):
+    global _engine
+    from .agents.rule_agent import GeoGuessRuleAgent
+    agent: GeoGuessRuleAgent
+
+    if req.use_llm:
+        try:
+            from .agents.llm_agent import GeoGuessLLMAgent
+            agent = GeoGuessLLMAgent()
+        except Exception:
+            from .agents.rule_agent import GeoGuessRuleAgent
+            agent = GeoGuessRuleAgent()
+    else:
+        from .agents.rule_agent import GeoGuessRuleAgent
+        agent = GeoGuessRuleAgent()
+
+    engine = GeoGuessEngine()
+    _engine = engine
+
+    obs = await engine.reset(
+        dataset_id=req.dataset_id,
+        total_rounds=req.total_rounds,
+        max_steps_per_round=req.max_steps_per_round,
+        max_guesses_per_round=req.max_guesses_per_round,
+        seed=req.seed,
+    )
+
+    await _broadcast({"type": "episode_start", **engine.get_full_state_dict()})
+
+    done = False
+    round_scores = []
+    while not done:
+        action = agent.act(obs)
+        obs, reward, done = await engine.step(action)
+        state_dict = engine.get_full_state_dict()
+
+        if obs.done or reward > 0:
+            await _broadcast({"type": "round_end", "reward": reward, **state_dict})
+        else:
+            await _broadcast({"type": "state_update", **state_dict})
+
+        if reward > 0:
+            round_scores.append(reward)
+
+        if req.step_delay_ms > 0:
+            await asyncio.sleep(req.step_delay_ms / 1000)
+
+    await _broadcast({"type": "episode_end", **engine.get_full_state_dict()})
+
+    return {
+        "episode_score": engine.state.episode_score if engine.state else 0.0,
+        "rounds": len(round_scores),
+        "round_scores": round_scores,
+    }
+
+
+@app.post("/auto_play/start")
+async def auto_play_start(req: RunGameRequest):
+    global _auto_play_task
+
+    async def _loop():
+        seed = req.seed
+        while True:
+            await run_game(RunGameRequest(
+                dataset_id=req.dataset_id,
+                total_rounds=req.total_rounds,
+                max_steps_per_round=req.max_steps_per_round,
+                max_guesses_per_round=req.max_guesses_per_round,
+                step_delay_ms=req.step_delay_ms,
+                seed=seed,
+                use_llm=req.use_llm,
+            ))
+            seed += 1
+            await asyncio.sleep(0.5)
+
+    if _auto_play_task and not _auto_play_task.done():
+        _auto_play_task.cancel()
+    _auto_play_task = asyncio.create_task(_loop())
+    return {"status": "started"}
+
+
+@app.post("/auto_play/stop")
+async def auto_play_stop():
+    global _auto_play_task
+    if _auto_play_task and not _auto_play_task.done():
+        _auto_play_task.cancel()
+        _auto_play_task = None
+    return {"status": "stopped"}
+
+
+@app.get("/auto_play/status")
+async def auto_play_status():
+    running = bool(_auto_play_task and not _auto_play_task.done())
+    state = _engine.state if _engine else None
+    return {
+        "running": running,
+        "round": state.current_round if state else -1,
+        "episode": _training_episode,
+    }
+
+
+# ─── Cesium frontend WebSocket ────────────────────────────────────────────────
+
+
+@app.websocket("/ws/geoguess")
+async def ws_geoguess(websocket: WebSocket):
+    await websocket.accept()
+    _ws_connections.add(websocket)
+    # Send current state immediately on connect
+    if _engine is not None:
+        await websocket.send_text(
+            json.dumps({"type": "state_update", **_serialize_full_state()})
+        )
+    try:
+        while True:
+            msg = await websocket.receive_text()
+            try:
+                data = json.loads(msg)
+                if data.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_connections.discard(websocket)

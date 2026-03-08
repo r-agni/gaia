@@ -1,0 +1,20 @@
+services:
+  geoguess:
+    build: .
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      # Mount source for hot-reload during development
+      - ./geoguess:/app/battlefield
+      - ./agents:/app/agents
+      - ./client:/app/client
+    command: uvicorn geoguess.server:app --host 0.0.0.0 --port 8001 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
