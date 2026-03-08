@@ -179,18 +179,18 @@ class RunGameRequest(BaseModel):
 async def _run_game_impl(req: RunGameRequest):
     """Run one game to completion; broadcasts state via WebSocket. Used by POST /run_game and auto_play."""
     global _engine
-    from .agents.rule_agent import GeoGuessRuleAgent
+    from agents.rule_agent import GeoGuessRuleAgent
     agent: GeoGuessRuleAgent
 
     if req.use_llm:
         try:
-            from .agents.llm_agent import GeoGuessLLMAgent
+            from agents.llm_agent import GeoGuessLLMAgent
             agent = GeoGuessLLMAgent()
         except Exception:
-            from .agents.rule_agent import GeoGuessRuleAgent
+            from agents.rule_agent import GeoGuessRuleAgent
             agent = GeoGuessRuleAgent()
     else:
-        from .agents.rule_agent import GeoGuessRuleAgent
+        from agents.rule_agent import GeoGuessRuleAgent
         agent = GeoGuessRuleAgent()
 
     engine = GeoGuessEngine()
