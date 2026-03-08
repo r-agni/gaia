@@ -95,6 +95,16 @@ app.get('/api/battlefield/auto_play/status', async (req, res) => {
   }
 });
 
+app.get('/api/battlefield/training/status', async (req, res) => {
+  try {
+    const r = await fetch(`${BATTLEFIELD_API}/training/status`);
+    if (!r.ok) return res.status(r.status).json({ error: `Battlefield API error ${r.status}` });
+    res.json(await r.json());
+  } catch (err) {
+    res.status(503).json({ error: 'Battlefield env not running', detail: err.message });
+  }
+});
+
 /** Health check */
 app.get('/api/health', (_req, res) => {
   res.json({

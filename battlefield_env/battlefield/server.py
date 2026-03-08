@@ -47,15 +47,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Register OpenEnv standard routes ────────────────────────────────────────
-
-_openenv_server = HTTPEnvServer(
-    env=BattlefieldEnvironment,
-    action_cls=BattlefieldCombinedAction,
-    observation_cls=BattlefieldObservation,
-)
-_openenv_server.register_routes(app)
-
 # ─── Shared engine for custom routes ─────────────────────────────────────────
 # The OpenEnv /reset and /step routes create a fresh BattlefieldEnvironment per
 # request (stateless HTTP pattern).  For the Cesium WS stream and /run_episode
@@ -63,6 +54,7 @@ _openenv_server.register_routes(app)
 
 _engine: Optional[BattlefieldEngine] = None
 _ws_connections: set[WebSocket] = set()
+_training_episode: int = 0
 
 
 def _serialize_full_state() -> dict:
@@ -81,12 +73,76 @@ async def _broadcast(msg: dict) -> None:
     _ws_connections.difference_update(dead)
 
 
+def _schedule_broadcast(msg: dict) -> None:
+    """Fire-and-forget broadcast safe to call from synchronous (OpenEnv) contexts."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_broadcast(msg))
+        else:
+            loop.run_until_complete(_broadcast(msg))
+    except Exception:
+        pass
+
+
+class _BroadcastingBattlefieldEnvironment(BattlefieldEnvironment):
+    """
+    Wraps BattlefieldEnvironment so that training steps (via OpenEnv /ws)
+    are broadcast to the Cesium frontend WebSocket in real time.
+    """
+
+    def reset(self, **kwargs):
+        global _engine, _training_episode
+        _training_episode += 1
+        obs = super().reset(**kwargs)
+        _engine = self._engine
+        _schedule_broadcast({
+            "type": "episode_start",
+            "episode": _training_episode,
+            "training_mode": True,
+            **_serialize_full_state(),
+        })
+        return obs
+
+    def step(self, action, **kwargs):
+        global _engine
+        result = super().step(action, **kwargs)
+        _engine = self._engine
+        _schedule_broadcast({
+            "type": "state_update",
+            "episode": _training_episode,
+            "training_mode": True,
+            **_serialize_full_state(),
+        })
+        return result
+
+
+# ─── Register OpenEnv standard routes ────────────────────────────────────────
+
+_openenv_server = HTTPEnvServer(
+    env=_BroadcastingBattlefieldEnvironment,
+    action_cls=BattlefieldCombinedAction,
+    observation_cls=BattlefieldObservation,
+)
+_openenv_server.register_routes(app)
+
+
 # ─── Custom REST endpoints ────────────────────────────────────────────────────
 
 
 @app.get("/scenarios")
 async def scenarios():
     return list_scenarios()
+
+
+@app.get("/training/status")
+async def training_status():
+    """Returns current training episode/tick info for the UI."""
+    return {
+        "episode": _training_episode,
+        "tick": _engine.state.tick if (_engine and _engine.state) else -1,
+        "training_mode": _training_episode > 0,
+    }
 
 
 class RunEpisodeRequest(BaseModel):

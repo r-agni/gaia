@@ -50,41 +50,60 @@ function App() {
     setViewerReady(true);
   }, []);
 
+  // Tracks whether the camera has flown to the battlefield yet (reset on re-connect)
+  const hasFlewToBattlefield = useRef(false);
+
+  // Wrap connect so that re-connecting always allows one fresh fly-to
+  const handleBattlefieldConnect = useCallback(() => {
+    hasFlewToBattlefield.current = false;
+    battlefieldConnect();
+  }, [battlefieldConnect]);
+
   // Auto-connect to battlefield on boot
   const hasAutoConnected = useRef(false);
   useEffect(() => {
     if (booted && !hasAutoConnected.current) {
       hasAutoConnected.current = true;
-      battlefieldConnect();
+      handleBattlefieldConnect();
     }
-  }, [booted, battlefieldConnect]);
+  }, [booted, handleBattlefieldConnect]);
 
-  // Fly to battlefield when first state arrives or when a new episode starts (e.g. Run Sim).
-  // Also re-runs when viewerReady flips, in case state arrived before the viewer was initialised.
-  const hasFlewToBattlefield = useRef(false);
+  // Fly to battlefield once on first connect/state arrival.
+  // Does NOT re-fly on every new training episode — camera stays where user left it.
+  // Re-runs when viewerReady flips, in case state arrived before the viewer was initialised.
   useEffect(() => {
     if (!battlefieldState) return;
     const viewer = viewerRef.current;
     if (!viewer || viewer.isDestroyed()) return;
-    const isNewEpisode = battlefieldState.tick === 0;
-    if (!hasFlewToBattlefield.current || isNewEpisode) {
-      hasFlewToBattlefield.current = true;
-      const anchor = battlefieldState.geo_anchor;
-      const lon = (anchor && anchor.lon0 != null) ? anchor.lon0 : 22.2;
-      const lat = (anchor && anchor.lat0 != null) ? anchor.lat0 : 48.5;
-      viewer.trackedEntity = undefined;
-      viewer.camera.flyTo({
-        destination: Cartesian3.fromDegrees(lon, lat, 12_000),
-        orientation: {
-          heading: CesiumMath.toRadians(0),
-          pitch: CesiumMath.toRadians(-60),
-          roll: 0,
-        },
-        duration: 2,
-      });
-      // requestRenderMode: make sure the frame actually draws after flying
-      if (!viewer.isDestroyed()) viewer.scene.requestRender();
-    }
+    if (hasFlewToBattlefield.current) return;  // only fly once per connect
+    hasFlewToBattlefield.current = true;
+    const anchor = battlefieldState.geo_anchor;
+    const lat0 = (anchor?.lat0 != null) ? anchor.lat0 : 48.5;
+    const lon0 = (anchor?.lon0 != null) ? anchor.lon0 : 22.2;
+    const scale = anchor?.scale_m_per_cell ?? 100;
+    const mapW = anchor?.map_width_cells ?? 300;
+    const mapH = anchor?.map_height_cells ?? 300;
+
+    // Compute geographic center of the battlefield (geo_anchor is the grid x=0,y=0 origin)
+    const cosLat = Math.cos(lat0 * Math.PI / 180) || 0.0001;
+    const centerLat = lat0 + (mapH / 2 * scale) / 111320;
+    const centerLon = lon0 + (mapW / 2 * scale) / (111320 * cosLat);
+
+    // Altitude: fit the battlefield diagonal in view with 1.5× padding, clamped to 40–120 km
+    const mapDiagMeters = Math.sqrt((mapW * scale) ** 2 + (mapH * scale) ** 2);
+    const altitude = Math.max(40_000, Math.min(120_000, mapDiagMeters * 1.5));
+
+    viewer.trackedEntity = undefined;
+    viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(centerLon, centerLat, altitude),
+      orientation: {
+        heading: CesiumMath.toRadians(0),
+        pitch: CesiumMath.toRadians(-55),
+        roll: 0,
+      },
+      duration: 2,
+    });
+    if (!viewer.isDestroyed()) viewer.scene.requestRender();
   }, [battlefieldState, viewerReady]); // viewerReady in deps so we retry if viewer wasn't ready
 
   // Auto-play handlers
@@ -170,7 +189,7 @@ function App() {
         battlefieldConnected={battlefieldConnected}
         battlefieldScenario={battlefieldScenario}
         onBattlefieldScenarioChange={setBattlefieldScenario}
-        onBattlefieldConnect={battlefieldConnect}
+        onBattlefieldConnect={handleBattlefieldConnect}
         onBattlefieldDisconnect={battlefieldDisconnect}
         battlefieldTick={battlefieldState?.tick}
         battlefieldMaxTicks={battlefieldState?.max_ticks}
@@ -179,6 +198,8 @@ function App() {
         onBattlefieldAutoPlayStart={handleBattlefieldAutoPlayStart}
         onBattlefieldAutoPlayStop={handleBattlefieldAutoPlayStop}
         battlefieldError={battlefieldError}
+        battlefieldTrainingMode={battlefieldState?.training_mode}
+        battlefieldEpisode={battlefieldState?.episode}
       />
       <BattlefieldStatsPanel state={battlefieldState} visible={true} />
       <IntelFeed items={allFeedItems} isMobile={isMobile} />

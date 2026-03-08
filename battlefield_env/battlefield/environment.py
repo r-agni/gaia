@@ -301,5 +301,7 @@ def _engine_state_to_pydantic(engine: Optional[BattlefieldEngine]) -> Battlefiel
             "lat0": anchor.lat0,
             "lon0": anchor.lon0,
             "scale_m_per_cell": anchor.scale_m_per_cell,
+            "map_width_cells": s.scenario.map_size[0],
+            "map_height_cells": s.scenario.map_size[1],
         },
     )

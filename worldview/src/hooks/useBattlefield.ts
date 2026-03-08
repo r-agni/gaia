@@ -38,7 +38,9 @@ export interface BattlefieldState {
   }[];
   attacker_resources: number;
   defender_resources: number;
-  geo_anchor?: { lat0: number; lon0: number; scale_m_per_cell: number };
+  geo_anchor?: { lat0: number; lon0: number; scale_m_per_cell: number; map_width_cells?: number; map_height_cells?: number };
+  training_mode?: boolean;
+  episode?: number;
 }
 
 const RECONNECT_DELAY = 3000;
@@ -90,7 +92,11 @@ export function useBattlefield(enabled: boolean): {
         // Server spreads state at top level: {"type": "state_update", tick: N, units: [...], ...}
         if (msg.type === 'state_update' || msg.type === 'episode_start') {
           const { type: _t, ...rest } = msg;
-          const newState: BattlefieldState = rest as BattlefieldState;
+          const newState: BattlefieldState = {
+            ...rest as BattlefieldState,
+            training_mode: msg.training_mode ?? (rest as BattlefieldState).training_mode ?? false,
+            episode: msg.episode ?? (rest as BattlefieldState).episode,
+          };
           setState(newState);
 
           // Emit feed items for each new combat log entry

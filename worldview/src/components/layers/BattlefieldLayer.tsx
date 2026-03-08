@@ -18,6 +18,7 @@ import {
   BillboardCollection,
   LabelCollection,
   PointPrimitiveCollection,
+  PolylineCollection,
   BlendOption,
   VerticalOrigin,
   HorizontalOrigin,
@@ -398,6 +399,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
     objBillboards: BillboardCollection;
     objLabels: LabelCollection;
     combatPoints: PointPrimitiveCollection;
+    trails: PolylineCollection;
   } | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -414,18 +416,21 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
     const objBillboards = new BillboardCollection();
     const objLabels = new LabelCollection({ blendOption: BlendOption.TRANSLUCENT });
     const combatPoints = new PointPrimitiveCollection();
+    const trails = new PolylineCollection();
 
+    viewer.scene.primitives.add(trails);  // add trails first so they render beneath units
     viewer.scene.primitives.add(billboards);
     viewer.scene.primitives.add(labels);
     viewer.scene.primitives.add(objBillboards);
     viewer.scene.primitives.add(objLabels);
     viewer.scene.primitives.add(combatPoints);
 
-    collectionsRef.current = { billboards, labels, objBillboards, objLabels, combatPoints };
+    collectionsRef.current = { billboards, labels, objBillboards, objLabels, combatPoints, trails };
 
     return () => {
       try {
         if (!viewer.isDestroyed()) {
+          try { viewer.scene.primitives.remove(trails); } catch { /* ok */ }
           try { viewer.scene.primitives.remove(billboards); } catch { /* ok */ }
           try { viewer.scene.primitives.remove(labels); } catch { /* ok */ }
           try { viewer.scene.primitives.remove(objBillboards); } catch { /* ok */ }
@@ -448,6 +453,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
 
     if (!visible || !state) {
       try {
+        cols.trails.removeAll();
         cols.billboards.removeAll();
         cols.labels.removeAll();
         cols.objBillboards.removeAll();
@@ -492,13 +498,48 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
 
         const alt = getUnitAltitude(u);
         const position = Cartesian3.fromDegrees(u.position.lon, u.position.lat, alt);
+
+        // Dead units: show briefly as faded red icon with no label, no trail update
+        if (u.status === 'destroyed') {
+          const existing = primitiveMapRef.current.get(u.unit_id);
+          if (existing) {
+            existing.billboard.position = position;
+            existing.billboard.color = Color.RED.withAlpha(0.35);
+            existing.label.show = false;
+          } else {
+            const billboard = c.billboards.add({
+              position,
+              image: createUnitIcon(u.side, u.unit_type, 0, false),
+              color: Color.RED.withAlpha(0.35),
+              scale: 0.8,
+              horizontalOrigin: HorizontalOrigin.CENTER,
+              verticalOrigin: VerticalOrigin.CENTER,
+              scaleByDistance: new NearFarScalar(500, 1.6, 2e6, 0.3),
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            });
+            const label = c.labels.add({
+              position,
+              text: '',
+              font: '11px monospace',
+              fillColor: Color.RED.withAlpha(0),
+              outlineColor: Color.BLACK,
+              outlineWidth: 0,
+              style: LabelStyle.FILL_AND_OUTLINE,
+              verticalOrigin: VerticalOrigin.BOTTOM,
+              pixelOffset: LABEL_OFFSET,
+              show: false,
+            });
+            primitiveMapRef.current.set(u.unit_id, { billboard, label });
+          }
+          continue;
+        }
+
         const hpFrac = u.max_health > 0 ? u.health / u.max_health : 0;
         const inCombat = (u.cooldown_ticks_remaining ?? 0) > 0;
         const typeName = TYPE_NAMES[u.unit_type] ?? u.unit_type;
 
         let statusText = '';
-        if (u.status === 'destroyed') statusText = ' [DEAD]';
-        else if (u.dug_in) statusText = ' [DUG IN]';
+        if (u.dug_in) statusText = ' [DUG IN]';
         else if (u.status === 'retreating') statusText = ' [RETREAT]';
 
         const labelText = `${typeName}${statusText}\n${Math.round(u.health)}/${u.max_health} HP`;
@@ -527,10 +568,12 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
         const existing = primitiveMapRef.current.get(u.unit_id);
         if (existing) {
           existing.billboard.position = position;
+          existing.billboard.color = Color.WHITE;
           existing.billboard.image = createUnitIcon(u.side, u.unit_type, hpFrac, inCombat);
           existing.label.position = position;
           existing.label.text = labelText;
           existing.label.fillColor = labelColor.withAlpha(0.9);
+          existing.label.show = true;
         } else {
           const billboard = c.billboards.add({
             position,
@@ -633,6 +676,25 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
         }
       }
 
+      // Movement trails — rebuild every tick (cheap: max 5 positions × ~20 units)
+      try { c.trails.removeAll(); } catch { /* ok */ }
+      for (const u of state.units) {
+        if (u.status === 'destroyed') continue;
+        const trail = trailMapRef.current.get(u.unit_id);
+        if (!trail || trail.length < 2) continue;
+        const alt = getUnitAltitude(u);
+        const positions = trail.map(p => Cartesian3.fromDegrees(p.lon, p.lat, alt));
+        const sideHex = SIDE_COLORS[u.side] ?? '#FFFFFF';
+        const trailColor = Color.fromCssColorString(sideHex).withAlpha(0.5);
+        try {
+          c.trails.add({
+            positions,
+            width: 2,
+            material: Cesium.Material.fromType('Color', { color: trailColor }),
+          });
+        } catch { /* ok */ }
+      }
+
       // requestRenderMode=true means Cesium won't redraw unless asked explicitly.
       // Force a render now that primitives have been mutated.
       try { if (!viewer.isDestroyed()) viewer.scene.requestRender(); } catch { /* ok */ }
@@ -647,6 +709,7 @@ export default function BattlefieldLayer({ state, visible, isTracking }: Battlef
   useEffect(() => {
     const cols = collectionsRef.current;
     if (!cols) return;
+    cols.trails.show = visible;
     cols.billboards.show = visible;
     cols.labels.show = visible && !isTracking;
     cols.objBillboards.show = visible;

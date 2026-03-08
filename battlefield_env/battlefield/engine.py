@@ -263,10 +263,12 @@ class BattlefieldEngine:
         self._update_objectives()
 
         # 8. Destroy dead units, decrement cooldowns
+        newly_destroyed_this_tick: set[str] = set()
         for u in s.units.values():
             if u.health <= 0 and u.is_alive:
                 u.status = UnitStatus.DESTROYED
                 u.health = 0
+                newly_destroyed_this_tick.add(u.unit_id)
                 if u.side == "attacker":
                     s.attacker_destroyed_count += 1
                 else:
@@ -280,6 +282,13 @@ class BattlefieldEngine:
                 ))
             if u.cooldown_remaining > 0:
                 u.cooldown_remaining -= 1
+
+        # Prune units that were already DESTROYED before this tick.
+        # Units destroyed THIS tick stay for one broadcast (frontend sees the death),
+        # then are removed on the next step. This prevents memory bloat over long episodes.
+        for uid in list(s.units.keys()):
+            if s.units[uid].status == UnitStatus.DESTROYED and uid not in newly_destroyed_this_tick:
+                del s.units[uid]
 
         # 9. Win conditions
         self._check_win_conditions()
@@ -352,7 +361,7 @@ class BattlefieldEngine:
             ))
 
         patches = []
-        for u in friendly[:5]:  # limit to 5 units for brevity
+        for u in friendly[:20]:  # provide terrain context for more units
             ttype = get_terrain_at(u.position, self._ttype)
             patches.append(TerrainPatch(
                 center_pos=u.position,
@@ -518,15 +527,17 @@ class BattlefieldEngine:
                 cap.capture_progress = max(0.0, cap.capture_progress - 0.05)
                 cap.ticks_held = 0
             elif att_present:
-                if cap.controlling_side != "attacker":
-                    cap.capture_progress = max(0.0, cap.capture_progress)
+                if cap.controlling_side not in ("attacker", "contested"):
+                    # Side switch: attacker must capture from scratch
+                    cap.capture_progress = 0.0
                 cap.controlling_side = "attacker"
                 cap.capture_progress = min(1.0, cap.capture_progress + 1.0 / cap.capture_ticks_required)
                 if cap.capture_progress >= 1.0:
                     cap.ticks_held += 1
             elif def_present:
-                if cap.controlling_side != "defender":
-                    cap.capture_progress = max(0.0, cap.capture_progress)
+                if cap.controlling_side not in ("defender", "contested"):
+                    # Side switch: defender must recapture from scratch
+                    cap.capture_progress = 0.0
                 cap.controlling_side = "defender"
                 if cap.capture_progress < 0.5:
                     cap.capture_progress = min(1.0, cap.capture_progress + 1.0 / cap.capture_ticks_required)

@@ -24,12 +24,11 @@ def compute_attacker_reward(
         if cap.controlling_side == "attacker" and delta > 0:
             reward += delta * 5.0   # up to +0.5 per 10% advance
 
-    # Sparse: objective fully captured
-    fully_captured = sum(
-        1 for cap in state.objective_captures.values()
-        if cap.controlling_side == "attacker" and cap.capture_progress >= 1.0
-    )
-    reward += fully_captured * 20.0
+    # Sparse: objective NEWLY fully captured this tick (first-capture-only bonus)
+    for obj_id, cap in state.objective_captures.items():
+        prev = prev_obj_progress.get(obj_id, 0.0)
+        if cap.controlling_side == "attacker" and cap.capture_progress >= 1.0 and prev < 1.0:
+            reward += 20.0  # one-time bonus on capture
 
     # Terminal: all objectives captured (win)
     if state.is_terminal and state.winner == "attacker":
@@ -43,13 +42,21 @@ def compute_attacker_reward(
     # Sparse: own unit lost
     reward -= own_units_lost * 3.0
 
-    # Shaped: time pressure
-    reward -= 0.1
+    # Shaped: time pressure (scaled to be meaningful against objective bonuses)
+    reward -= 0.5
 
-    # Shaped: territory advance (average x-position of own units)
-    x_delta = curr_avg_x - prev_avg_x
-    if x_delta > 0:
-        reward += x_delta * 0.02
+    # Shaped: proximity to uncaptured objectives (scenario-agnostic)
+    for obj in state.scenario.objectives:
+        cap = state.objective_captures[obj.objective_id]
+        if cap.controlling_side != "attacker" or cap.capture_progress < 1.0:
+            nearest_dist = min(
+                (u.position.distance_to(obj.position)
+                 for u in state.units.values()
+                 if u.is_alive and u.side == "attacker"),
+                default=9999.0,
+            )
+            if nearest_dist < 50:
+                reward += max(0.0, (50.0 - nearest_dist) / 50.0) * 0.1
 
     return round(reward, 4)
 
@@ -73,10 +80,11 @@ def compute_defender_reward(
         if cap.controlling_side == "attacker" and cap.capture_progress > prev:
             reward -= (cap.capture_progress - prev) * 10.0
 
-    # Sparse: objective fully captured by attacker → defender loss
-    for cap in state.objective_captures.values():
-        if cap.controlling_side == "attacker" and cap.capture_progress >= 1.0:
-            reward -= 25.0
+    # Sparse: objective NEWLY fully captured by attacker this tick (first-capture-only)
+    for obj_id, cap in state.objective_captures.items():
+        prev = prev_obj_progress.get(obj_id, 0.0)
+        if cap.controlling_side == "attacker" and cap.capture_progress >= 1.0 and prev < 1.0:
+            reward -= 25.0  # one-time penalty when objective is first lost
 
     # Shaped: time survived
     reward += 0.3

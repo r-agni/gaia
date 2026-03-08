@@ -106,9 +106,16 @@ function BattlefieldStatsPanel({ state, visible }: BattlefieldStatsPanelProps) {
           <span style={{ fontSize: 11, fontWeight: 600, color: ACCENT, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             Battlefield
           </span>
-          <span style={{ fontSize: 10, color: MUTED }}>
-            Tick {state.tick} / {state.max_ticks}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {state.episode !== undefined && (
+              <span style={{ fontSize: 9, color: ACCENT, letterSpacing: '0.08em', fontWeight: 600 }}>
+                EP {state.episode}
+              </span>
+            )}
+            <span style={{ fontSize: 10, color: MUTED }}>
+              Tick {state.tick} / {state.max_ticks}
+            </span>
+          </div>
         </div>
 
         {/* Tick bar */}

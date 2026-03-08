@@ -31,6 +31,8 @@ interface OperationsPanelProps {
   onBattlefieldAutoPlayStart?: () => void;
   onBattlefieldAutoPlayStop?: () => void;
   battlefieldError?: string | null;
+  battlefieldTrainingMode?: boolean;
+  battlefieldEpisode?: number;
 }
 
 const S = {
@@ -120,6 +122,8 @@ function OperationsPanel({
   onBattlefieldAutoPlayStart,
   onBattlefieldAutoPlayStop,
   battlefieldError,
+  battlefieldTrainingMode,
+  battlefieldEpisode,
 }: OperationsPanelProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -202,6 +206,31 @@ function OperationsPanel({
             <span style={{ color: '#E8A045', fontWeight: 600 }}>{battlefieldTick}</span>
             <span style={{ color: '#252d3d' }}> / </span>
             <span style={{ color: '#d4dbe8' }}>{battlefieldMaxTicks}</span>
+          </div>
+        )}
+
+        {battlefieldTrainingMode && (
+          <div style={{
+            marginTop: 6,
+            padding: '4px 8px',
+            background: '#E8A04514',
+            border: '1px solid #E8A04540',
+            borderLeft: '2px solid #E8A045',
+            borderRadius: 2,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.12em',
+            color: '#E8A045',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>TRAINING</span>
+            {battlefieldEpisode !== undefined && (
+              <span style={{ fontWeight: 400, letterSpacing: '0.06em' }}>
+                EP {battlefieldEpisode}
+              </span>
+            )}
           </div>
         )}
 
