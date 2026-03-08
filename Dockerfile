@@ -8,40 +8,49 @@ RUN npm run build
 
 # Stage 2: runtime (Node + Python in one image)
 FROM node:20-bookworm-slim AS runtime
+
+# HF Spaces (and good practice) requires the container to run as uid 1000
+RUN useradd -m -u 1000 user
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
-# GeoGuess env (Python FastAPI)
-COPY geoguess_env/pyproject.toml /app/geoguess_env/
-COPY geoguess_env/geoguess /app/geoguess_env/geoguess
-COPY geoguess_env/agents /app/geoguess_env/agents
-COPY geoguess_env/client /app/geoguess_env/client
-COPY geoguess_env/data /app/geoguess_env/data
 # Set INSTALL_TRAINING=true to install TRL/vLLM/torch for auto GRPO (see DEPLOY.md §3)
 ARG INSTALL_TRAINING=false
+
+WORKDIR /home/user/app
+
+# GeoGuess env (Python FastAPI) — install as root so pip can write to system dirs
+COPY --chown=user geoguess_env/pyproject.toml /home/user/app/geoguess_env/
+COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
+COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
+COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
+COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 RUN if [ "$INSTALL_TRAINING" = "true" ]; then \
-      cd /app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \
+      cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \
     else \
-      cd /app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"; \
+      cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"; \
     fi
 
 # Worldview (Node server + built static)
-COPY --from=worldview-build /worldview/dist /app/worldview/dist
-COPY worldview/server /app/worldview/server
-COPY worldview/package.json worldview/package-lock.json /app/worldview/
-RUN cd /app/worldview && npm ci --omit=dev
+COPY --chown=user --from=worldview-build /worldview/dist /home/user/app/worldview/dist
+COPY --chown=user worldview/server /home/user/app/worldview/server
+COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/app/worldview/
+RUN cd /home/user/app/worldview && npm ci --omit=dev
+
+COPY --chown=user scripts/start.sh /home/user/app/start.sh
+RUN chmod +x /home/user/app/start.sh
 
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV GEOGUESS_API=http://127.0.0.1:8002
 ENV PYTHONUNBUFFERED=1
+ENV HOME=/home/user
+ENV PATH=/home/user/.local/bin:$PATH
 
 EXPOSE 3001
 
-COPY scripts/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-WORKDIR /app
-CMD ["/app/start.sh"]
+USER user
+WORKDIR /home/user/app
+CMD ["/home/user/app/start.sh"]
