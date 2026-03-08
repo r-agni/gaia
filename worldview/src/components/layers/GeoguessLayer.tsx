@@ -165,18 +165,40 @@ export default function GeoguessLayer({ state, visible }: Props) {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       });
 
-      // Error line: guess → actual
       if (state.current_guess_lat != null && state.current_guess_lon != null) {
+        const guessPos = Cartesian3.fromDegrees(state.current_guess_lon, state.current_guess_lat, 200);
+        const actualPos = Cartesian3.fromDegrees(state.secret_lon, state.secret_lat, 200);
+
+        // Dashed error line: guess → actual
         try {
           cols.lines.add({
-            positions: [
-              Cartesian3.fromDegrees(state.current_guess_lon, state.current_guess_lat, 200),
-              Cartesian3.fromDegrees(state.secret_lon, state.secret_lat, 200),
-            ],
+            positions: [guessPos, actualPos],
             width: 2,
-            material: Cesium.Material.fromType('Color', { color: Color.RED.withAlpha(0.7) }),
+            material: Cesium.Material.fromType('PolylineDash', {
+              color: Color.RED.withAlpha(0.8),
+              dashLength: 16,
+            }),
           });
         } catch { /* ok */ }
+
+        // Distance label at midpoint
+        const lastGuess = state.guesses.length > 0 ? state.guesses[state.guesses.length - 1] : null;
+        if (lastGuess) {
+          const midLon = (state.current_guess_lon + state.secret_lon) / 2;
+          const midLat = (state.current_guess_lat + state.secret_lat) / 2;
+          const midPos = Cartesian3.fromDegrees(midLon, midLat, 300);
+          cols.labels.add({
+            position: midPos,
+            text: `${lastGuess.distance_km.toFixed(0)} km`,
+            font: '12px monospace',
+            fillColor: Color.WHITE,
+            outlineColor: Color.BLACK,
+            outlineWidth: 3,
+            style: LabelStyle.FILL_AND_OUTLINE,
+            verticalOrigin: VerticalOrigin.CENTER,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+        }
       }
     }
 

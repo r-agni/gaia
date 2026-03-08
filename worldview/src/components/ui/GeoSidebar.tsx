@@ -128,33 +128,64 @@ function SidebarContent({ state, connected }: { state: GeoGuessState | null; con
         </div>
       </div>
 
-      {roundRevealed && (
-        <div className="p-2 border-b border-wv-border bg-wv-green/5">
-          <div className="text-[10px] text-wv-text">
-            {state.secret_country !== '??' ? state.secret_country : '—'}
-            {state.secret_region && state.secret_region !== '??' && `, ${state.secret_region}`}
+      {/* Scene description — what the agent sees */}
+      {state.scene_description && (
+        <div className="p-2 border-b border-wv-border">
+          <div className="text-[8px] text-wv-cyan/70 mb-1">Scene</div>
+          <div className="text-[9px] text-wv-text/80 leading-relaxed max-h-24 overflow-y-auto">
+            {state.scene_description}
           </div>
-          <div className="text-[9px] text-wv-muted mt-0.5 font-mono">
-            {state.secret_lat?.toFixed(3)}°, {state.secret_lon?.toFixed(3)}°
+        </div>
+      )}
+
+      {/* Guess vs Actual comparison — shown when round ends */}
+      {roundRevealed && (
+        <div className="border-b border-wv-border">
+          <div className="grid grid-cols-2 divide-x divide-wv-border">
+            {/* Guess column */}
+            <div className="p-2">
+              <div className="text-[8px] text-[#F97316] mb-1">Agent Guess</div>
+              {state.current_guess_lat != null ? (
+                <div className="text-[9px] text-wv-text font-mono">
+                  {state.current_guess_lat.toFixed(2)}°, {state.current_guess_lon?.toFixed(2)}°
+                </div>
+              ) : (
+                <div className="text-[9px] text-wv-muted">No guess</div>
+              )}
+            </div>
+            {/* Actual column */}
+            <div className="p-2">
+              <div className="text-[8px] text-wv-green mb-1">Actual</div>
+              <div className="text-[9px] text-wv-text font-mono">
+                {state.secret_lat?.toFixed(2)}°, {state.secret_lon?.toFixed(2)}°
+              </div>
+              <div className="text-[9px] text-wv-text mt-0.5">
+                {state.secret_country !== '??' ? state.secret_country : ''}
+                {state.secret_region && state.secret_region !== '??' && `, ${state.secret_region}`}
+              </div>
+            </div>
           </div>
           {lastGuess && (
-            <div className="mt-1.5 flex items-center gap-2 text-[10px]">
+            <div className="px-2 pb-2 flex items-center gap-2 text-[10px]">
               <span className="text-wv-muted">Distance</span>
               <span className={scoreColor(lastGuess.score)}>{lastGuess.distance_km.toFixed(0)} km</span>
-              <span className={`ml-auto ${scoreColor(lastGuess.score)}`}>{(lastGuess.score * 100).toFixed(0)}%</span>
+              <span className={`ml-auto font-medium ${scoreColor(lastGuess.score)}`}>{(lastGuess.score * 100).toFixed(0)}%</span>
             </div>
           )}
         </div>
       )}
 
+      {/* Current guess (mid-round, before reveal) */}
       {state.current_guess_lat != null && !roundRevealed && (
         <div className="px-2 py-1.5 border-b border-wv-border">
+          <div className="text-[8px] text-[#F97316] mb-0.5">Agent Guess</div>
           <div className="text-[9px] text-wv-muted font-mono">
-            Guess: {state.current_guess_lat.toFixed(3)}°, {state.current_guess_lon?.toFixed(3)}°
+            {state.current_guess_lat.toFixed(3)}°, {state.current_guess_lon?.toFixed(3)}°
           </div>
         </div>
       )}
 
+      {/* Oversight flags */}
       {state.oversight_flags && state.oversight_flags.length > 0 && (
         <div className="border-b border-wv-border bg-wv-red/5 px-2 py-1.5">
           <div className="text-[9px] text-wv-red font-medium">
@@ -175,20 +206,20 @@ function SidebarContent({ state, connected }: { state: GeoGuessState | null; con
 
       {/* Tool calls log */}
       <div className="flex-1">
-        <div className="px-3 py-2 border-b border-wv-border">
-          <div className="text-[8px] text-wv-muted tracking-widest uppercase">
-            Agent Activity
+        <div className="px-2 py-1.5 border-b border-wv-border">
+          <div className="text-[8px] text-wv-muted">
+            Activity
             {state.tool_calls.length > 0 && (
-              <span className="ml-2 text-wv-cyan">{state.tool_calls.length} calls</span>
+              <span className="ml-1 text-wv-cyan">{state.tool_calls.length}</span>
             )}
           </div>
         </div>
         {state.tool_calls.length === 0 ? (
-          <div className="px-3 py-4 text-[9px] text-wv-muted/50 text-center tracking-wider">
+          <div className="px-2 py-3 text-[9px] text-wv-muted/50 text-center">
             No tool calls yet
           </div>
         ) : (
-          <div className="overflow-y-auto max-h-64">
+          <div className="overflow-y-auto max-h-48">
             {[...state.tool_calls].reverse().map((call, i) => (
               <ToolCallRow key={`${call.tool_name}-${call.step}-${i}`} call={call} />
             ))}
@@ -198,9 +229,8 @@ function SidebarContent({ state, connected }: { state: GeoGuessState | null; con
 
       {/* Round history dots */}
       {state.total_rounds > 1 && (
-        <div className="p-3 border-t border-wv-border">
-          <div className="text-[8px] text-wv-muted tracking-widest uppercase mb-2">Round History</div>
-          <div className="flex gap-1.5 flex-wrap">
+        <div className="p-2 border-t border-wv-border">
+          <div className="flex gap-1 flex-wrap items-center">
             {Array.from({ length: state.total_rounds }, (_, i) => {
               const rh = state.round_history.find((r) => r.round_number === i);
               const isCurrent = i === state.current_round;
@@ -216,7 +246,7 @@ function SidebarContent({ state, connected }: { state: GeoGuessState | null; con
               );
             })}
             {state.round_history.length > 0 && (
-              <span className="text-[8px] text-wv-muted ml-1 self-center">
+              <span className="text-[8px] text-wv-muted ml-1">
                 avg {(state.round_history.reduce((s, r) => s + r.score, 0) / state.round_history.length * 100).toFixed(0)}%
               </span>
             )}

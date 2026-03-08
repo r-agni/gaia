@@ -38,6 +38,7 @@ export interface GeoGuessState {
   total_rounds: number;
   is_terminal: boolean;
   episode_score: number;
+  scene_description: string;
   secret_lat: number | null;
   secret_lon: number | null;
   secret_country: string;

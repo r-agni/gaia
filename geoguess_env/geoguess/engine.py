@@ -381,12 +381,17 @@ class GeoGuessEngine:
             except Exception:
                 pass
 
+        scene_description = ""
+        if round_state:
+            scene_description = round_state.initial_scene_description
+
         return {
             "episode_id": s.episode_id,
             "current_round": s.current_round,
             "total_rounds": s.total_rounds,
             "is_terminal": s.is_terminal,
             "episode_score": s.episode_score,
+            "scene_description": scene_description,
             "secret_lat": secret_lat,
             "secret_lon": secret_lon,
             "secret_country": secret_country,
