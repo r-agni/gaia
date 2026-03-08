@@ -23,6 +23,7 @@ COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
 COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
 COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
+COPY --chown=user geoguess_env/train_grpo.py /home/user/app/geoguess_env/train_grpo.py
 RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
 # Worldview ? pre-built dist committed to repo (no Vite build needed)
