@@ -4,7 +4,8 @@ WORKDIR /worldview
 COPY worldview/package.json worldview/package-lock.json ./
 RUN npm ci
 COPY worldview/ ./
-RUN npm run build
+# CesiumJS is large; ensure Node has enough heap for the build
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
 
 # Stage 2: runtime (Node + Python in one image)
 FROM node:20-bookworm-slim AS runtime
