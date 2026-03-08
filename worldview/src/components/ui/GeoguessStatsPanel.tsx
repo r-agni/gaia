@@ -5,7 +5,7 @@ import type { GeoGuessState } from '../../hooks/useGeoguess';
 
 const ACCENT = '#67E8F9';
 const MUTED = '#6B7280';
-const BG = 'rgba(10,14,23,0.88)';
+const BG = 'rgba(15,17,23,0.94)';
 const BORDER = '#1F2937';
 const GREEN = '#22C55E';
 const ORANGE = '#F97316';
@@ -47,7 +47,7 @@ export default function GeoguessStatsPanel({ state, visible }: Props) {
       fontSize: 11,
       color: '#D1D5DB',
       zIndex: 200,
-      backdropFilter: 'blur(4px)',
+      backdropFilter: 'blur(8px)',
       pointerEvents: 'none',
     }}>
       {/* Header */}

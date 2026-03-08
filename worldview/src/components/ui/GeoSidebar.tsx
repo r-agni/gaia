@@ -89,6 +89,19 @@ function ToolCallRow({ call }: { call: GeoGuessToolCall }) {
   );
 }
 
+function SceneImage({ episodeId, currentRound }: { episodeId: string; currentRound: number }) {
+  const [error, setError] = useState(false);
+  if (error) return null;
+  return (
+    <img
+      src={`/api/geoguess/scene_image?t=${episodeId}-${currentRound}`}
+      alt="Scene"
+      className="w-full max-h-[200px] object-cover rounded mb-1.5"
+      onError={() => setError(true)}
+    />
+  );
+}
+
 function SidebarContent({ state, connected }: { state: GeoGuessState | null; connected?: boolean }) {
   if (!state) {
     return (
@@ -128,10 +141,11 @@ function SidebarContent({ state, connected }: { state: GeoGuessState | null; con
         </div>
       </div>
 
-      {/* Scene description — what the agent sees */}
+      {/* Scene image + description — what the agent sees */}
       {state.scene_description && (
-        <div className="p-2 border-b border-wv-border">
+        <div className="p-2 border-b border-wv-border" key={`scene-${state.episode_id}-${state.current_round}`}>
           <div className="text-[8px] text-wv-cyan/70 mb-1">Scene</div>
+          <SceneImage episodeId={state.episode_id} currentRound={state.current_round} />
           <div className="text-[9px] text-wv-text/80 leading-relaxed max-h-24 overflow-y-auto">
             {state.scene_description}
           </div>

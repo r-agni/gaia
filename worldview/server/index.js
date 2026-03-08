@@ -986,6 +986,19 @@ app.get('/api/geoguess/state', async (req, res) => {
   }
 });
 
+app.get('/api/geoguess/scene_image', async (_req, res) => {
+  try {
+    const r = await fetch(`${GEOGUESS_API}/game/scene_image`);
+    if (!r.ok) return res.status(r.status).end();
+    const contentType = r.headers.get('content-type') || 'image/jpeg';
+    const buf = await r.arrayBuffer();
+    res.set('Content-Type', contentType);
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    res.status(503).end();
+  }
+});
+
 app.post('/api/geoguess/run_episode', async (req, res) => {
   try {
     const r = await fetch(`${GEOGUESS_API}/run_episode`, {

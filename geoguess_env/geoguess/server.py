@@ -28,8 +28,10 @@ import os
 import time
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from openenv.core.env_server.http_server import HTTPEnvServer
@@ -154,6 +156,35 @@ async def health():
 async def game_state():
     """Full game state for frontend polling."""
     return _serialize_full_state()
+
+
+@app.get("/game/scene_image")
+async def game_scene_image():
+    """Street View image for the current round's secret location. Returns 404 if no engine, no round, or no API key."""
+    google_key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+    if not google_key or _engine is None or _engine.state is None:
+        return Response(status_code=404)
+    s = _engine.state
+    if s.current_round >= len(s.rounds):
+        return Response(status_code=404)
+    round_state = s.rounds[s.current_round]
+    loc = round_state.location
+    sv_url = (
+        f"https://maps.googleapis.com/maps/api/streetview"
+        f"?size=400x400&location={loc.lat},{loc.lon}"
+        f"&fov=90&heading=0&pitch=0&key={google_key}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            img_r = await client.get(sv_url)
+            if img_r.status_code != 200 or len(img_r.content) < 5000:
+                return Response(status_code=404)
+            return Response(
+                content=img_r.content,
+                media_type=img_r.headers.get("content-type", "image/jpeg"),
+            )
+    except Exception:
+        return Response(status_code=404)
 
 
 @app.get("/datasets")
