@@ -288,12 +288,14 @@ async def auto_play_status():
 async def ws_geoguess(websocket: WebSocket):
     await websocket.accept()
     _ws_connections.add(websocket)
-    # Send current state immediately on connect
-    if _engine is not None:
-        await websocket.send_text(
-            json.dumps({"type": "state_update", **_serialize_full_state()})
-        )
     try:
+        if _engine is not None:
+            try:
+                await websocket.send_text(
+                    json.dumps({"type": "state_update", **_serialize_full_state()})
+                )
+            except Exception:
+                pass
         while True:
             msg = await websocket.receive_text()
             try:
@@ -302,7 +304,7 @@ async def ws_geoguess(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "pong"}))
             except Exception:
                 pass
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
         pass
     finally:
         _ws_connections.discard(websocket)

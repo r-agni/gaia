@@ -84,7 +84,11 @@ export function useGeoguess(enabled: boolean): {
     shouldReconnect.current = true;
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${window.location.host}/ws/geoguess`;
+    const host = window.location.host;
+    const isDev = host.includes('5173');
+    const url = isDev
+      ? `ws://${window.location.hostname}:3001/ws/geoguess`
+      : `${proto}//${host}/ws/geoguess`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 

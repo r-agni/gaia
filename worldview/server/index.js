@@ -1092,15 +1092,21 @@ if (isDirectRun) {
     if (url.pathname === '/ws/geoguess') {
       wss.handleUpgrade(request, socket, head, (clientWs) => {
         const backendUrl = `${GEOGUESS_WS}/ws/geoguess`;
+        console.log(`[WS] Client connected, opening backend: ${backendUrl}`);
         const backend = new WebSocket(backendUrl);
         backend.on('open', () => {
-          clientWs.on('message', (data) => backend.send(data));
-          backend.on('message', (data) => clientWs.send(data));
+          console.log('[WS] Backend connected — proxying messages');
+          clientWs.on('message', (data) => {
+            try { backend.send(data); } catch (e) { console.error('[WS] c→b send error:', e.message); }
+          });
+          backend.on('message', (data) => {
+            try { clientWs.send(data); } catch (e) { console.error('[WS] b→c send error:', e.message); }
+          });
         });
-        clientWs.on('close', () => backend.close());
-        backend.on('close', () => clientWs.close());
-        clientWs.on('error', () => backend.close());
-        backend.on('error', () => clientWs.close());
+        backend.on('error', (e) => { console.error('[WS] Backend error:', e.message); clientWs.close(); });
+        clientWs.on('close', () => { console.log('[WS] Client closed'); backend.close(); });
+        backend.on('close', () => { console.log('[WS] Backend closed'); clientWs.close(); });
+        clientWs.on('error', (e) => { console.error('[WS] Client error:', e.message); backend.close(); });
       });
     } else {
       socket.destroy();
