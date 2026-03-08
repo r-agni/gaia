@@ -89,8 +89,21 @@ To start **GRPO training** automatically when the container starts (vLLM + train
    - **`RUN_GRPO_TRAINING=true`** — starts vLLM on port 8000, then runs `train_grpo.py` (connects to GeoGuess env at `ws://127.0.0.1:8002`).
    - **`BASE_MODEL`** (optional) — model for vLLM and trainer (default: `Qwen/Qwen2.5-7B-Instruct`). Use a smaller model (e.g. `Qwen/Qwen2.5-0.5B-Instruct`) if you hit OOM on a single H100.
    - **`OUTPUT_DIR`** (optional) — where to save checkpoints (default: `/app/geoguess_env/geoguess-grpo-out`).
+   - **`TRAINING_STATUS_FILE`** (optional) — launcher status JSON path (default: `/tmp/gaia_training_status.json`).
+   - **`TRAINING_LOG_FILE`** (optional) — trainer stdout/stderr log path (default: `/tmp/gaia_train_grpo.log`).
+   - **`VLLM_LOG_FILE`** (optional) — vLLM stdout/stderr log path (default: `/tmp/gaia_vllm.log`).
+   - **`HF_SPACE_WEBHOOK_URL`** (optional) — if set, each completed episode is POSTed to this URL.
 
 The dataset must exist at `geoguess_env/data/training_1k.jsonl` (it is in the repo). Training runs in the background; the UI and auto_play continue to run as usual.
+
+### Verify Training Is Actually Running
+
+After deployment, check:
+
+- `GET /api/geoguess/training/runtime_status` from your public URL.
+  - `runtime_status.state` should move through: `initializing` -> `starting_vllm` -> `waiting_for_vllm` -> `running_trainer` -> `completed` (or `failed`).
+  - If deps are missing, it reports `skipped` with a concrete reason.
+- If `RUN_GRPO_TRAINING=true`, Node fallback autoplay is disabled by default so gameplay traffic does not mask training status.
 
 ---
 

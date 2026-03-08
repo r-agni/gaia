@@ -60,12 +60,67 @@ _training_episode: int = 0
 _auto_play_task: Optional[asyncio.Task] = None
 _episode_history: list[dict] = []
 _MAX_HISTORY = 500
+_hf_space_webhook_url = os.environ.get("HF_SPACE_WEBHOOK_URL", "").strip()
+_training_status_file = os.environ.get("TRAINING_STATUS_FILE", "/tmp/gaia_training_status.json")
+_hf_sync_status: dict = {
+    "enabled": bool(_hf_space_webhook_url),
+    "webhook_url_set": bool(_hf_space_webhook_url),
+    "last_attempt_ts": None,
+    "last_ok": None,
+    "last_status_code": None,
+    "last_error": None,
+}
 
 
 def _serialize_full_state() -> dict:
     if _engine is None:
         return {}
     return _engine.get_full_state_dict()
+
+
+def _read_training_runtime_status() -> dict:
+    status = {
+        "status_file": _training_status_file,
+        "present": False,
+        "state": "unknown",
+        "message": "No runtime status file found.",
+        "timestamp": None,
+    }
+    try:
+        if os.path.exists(_training_status_file):
+            with open(_training_status_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                status.update(data)
+                status["present"] = True
+    except Exception as e:
+        status["state"] = "error"
+        status["message"] = f"Failed to parse runtime status file: {e}"
+    return status
+
+
+async def _forward_episode_to_hf_space(episode_payload: dict) -> None:
+    """Best-effort webhook POST for external mirrors (e.g., HF Space backend)."""
+    global _hf_sync_status
+    if not _hf_space_webhook_url:
+        return
+    body = {
+        "source": "gaia",
+        "event_type": "episode_end",
+        "event_ts": time.time(),
+        "episode": episode_payload,
+    }
+    _hf_sync_status["last_attempt_ts"] = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            r = await client.post(_hf_space_webhook_url, json=body)
+        _hf_sync_status["last_status_code"] = r.status_code
+        _hf_sync_status["last_ok"] = 200 <= r.status_code < 300
+        _hf_sync_status["last_error"] = None if _hf_sync_status["last_ok"] else f"HTTP {r.status_code}"
+    except Exception as e:
+        _hf_sync_status["last_status_code"] = None
+        _hf_sync_status["last_ok"] = False
+        _hf_sync_status["last_error"] = str(e)
 
 
 async def _broadcast(msg: dict) -> None:
@@ -211,6 +266,16 @@ async def training_history():
     }
 
 
+@app.get("/training/runtime_status")
+async def training_runtime_status():
+    """Return launcher/runtime status for GRPO + optional HF webhook forwarding."""
+    return {
+        "run_grpo_training_env": os.environ.get("RUN_GRPO_TRAINING", "").lower() == "true",
+        "runtime_status": _read_training_runtime_status(),
+        "hf_space_sync": _hf_sync_status,
+    }
+
+
 @app.get("/oversight/summary")
 async def oversight_summary():
     """Return the oversight agent's current episode summary."""
@@ -304,6 +369,7 @@ async def _run_game_impl(req: RunGameRequest):
     })
     if len(_episode_history) > _MAX_HISTORY:
         _episode_history[:] = _episode_history[-_MAX_HISTORY:]
+    await _forward_episode_to_hf_space(_episode_history[-1])
 
 
 @app.post("/run_game")

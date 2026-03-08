@@ -288,6 +288,7 @@ Custom gameplay/ops routes:
 - `GET /auto_play/status`
 - `GET /training/status`
 - `GET /oversight/summary`
+- `GET /training/runtime_status`
 - `WS /ws/geoguess`
 
 ---
