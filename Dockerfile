@@ -1,24 +1,12 @@
-# Stage 1: build Worldview (React + Vite)
-FROM node:20-bookworm-slim AS worldview-build
-WORKDIR /worldview
-COPY worldview/package.json worldview/package-lock.json ./
-RUN npm ci
-COPY worldview/ ./
-# CesiumJS is large; ensure Node has enough heap for the build
-RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
-
 # Stage 2: runtime (Node + Python in one image)
 FROM node:20-bookworm-slim AS runtime
 
-# HF Spaces (and good practice) requires the container to run as uid 1000
+# HF Spaces requires the container to run as uid 1000
 RUN useradd -m -u 1000 user
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
-
-# Set INSTALL_TRAINING=true to install TRL/vLLM/torch for auto GRPO (see DEPLOY.md §3)
-ARG INSTALL_TRAINING=false
 
 WORKDIR /home/user/app
 
@@ -28,14 +16,10 @@ COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
 COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
 COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
-RUN if [ "$INSTALL_TRAINING" = "true" ]; then \
-      cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training]"; \
-    else \
-      cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"; \
-    fi
+RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
 
-# Worldview (Node server + built static)
-COPY --chown=user --from=worldview-build /worldview/dist /home/user/app/worldview/dist
+# Worldview — pre-built dist committed to repo (no Vite build needed)
+COPY --chown=user worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
 COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/app/worldview/
 RUN cd /home/user/app/worldview && npm ci --omit=dev
