@@ -1,0 +1,17 @@
+# Dependencies and build outputs
+worldview/node_modules
+worldview/dist
+battlefield_env/__pycache__
+battlefield_env/*.egg-info
+battlefield_env/.pytest_cache
+**/__pycache__
+**/.git
+**/.env
+**/.env.*
+!.env.example
+# IDE and OS
+.cursor
+.vscode
+*.log
+.DS_Store
+Thumbs.db

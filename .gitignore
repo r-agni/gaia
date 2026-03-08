@@ -1,0 +1,25 @@
+# Node
+worldview/node_modules/
+worldview/dist/
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+*.egg
+
+# Env files
+.env
+.env.local
+
+# IDE
+.vscode/
+.cursor/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
