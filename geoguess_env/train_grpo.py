@@ -211,6 +211,7 @@ if __name__ == "__main__":
     DATASET_PATH = os.environ.get("DATASET_PATH", "data/training_1k.jsonl")
     VLLM_URL = os.environ.get("VLLM_SERVER_URL", "http://localhost:8000")
     OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./geoguess-grpo-out")
+    USE_VLLM = os.environ.get("USE_VLLM", "true").strip().lower() == "true"
 
     if not Path(DATASET_PATH).exists():
         print(f"Dataset not found at {DATASET_PATH}.")
@@ -220,15 +221,12 @@ if __name__ == "__main__":
     dataset = load_geoguess_dataset(DATASET_PATH)
     print(f"Loaded {len(dataset)} training examples from {DATASET_PATH}")
 
-    config = GRPOConfig(
+    config_kwargs = dict(
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
         per_device_train_batch_size=2,
         gradient_accumulation_steps=8,
         learning_rate=1e-5,
-        use_vllm=True,
-        vllm_mode="server",                  # H100: vLLM on GPU 0, training on GPU 1
-        vllm_server_base_url=VLLM_URL,
         max_new_tokens=1024,                 # room for tool calls + reasoning + guess
         temperature=0.8,
         num_generations=8,                   # G in GRPO (samples per prompt)
@@ -236,6 +234,16 @@ if __name__ == "__main__":
         save_steps=200,
         report_to="none",
     )
+    if USE_VLLM:
+        # H100 path: vLLM on one GPU, training on another.
+        config_kwargs.update(
+            use_vllm=True,
+            vllm_mode="server",
+            vllm_server_base_url=VLLM_URL,
+        )
+    else:
+        config_kwargs.update(use_vllm=False)
+    config = GRPOConfig(**config_kwargs)
 
     trainer = GRPOTrainer(
         model=MODEL_ID,
@@ -246,7 +254,9 @@ if __name__ == "__main__":
     )
 
     print(f"Starting GRPO training with model: {MODEL_ID}")
-    print(f"vLLM server: {VLLM_URL}")
+    print(f"use_vllm={USE_VLLM}")
+    if USE_VLLM:
+        print(f"vLLM server: {VLLM_URL}")
     print(f"GeoGuessEnv server: {os.environ.get('GEOGUESS_ENV_URL', 'ws://localhost:8001')}")
     trainer.train()
     trainer.save_model(OUTPUT_DIR)
