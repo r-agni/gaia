@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
-from openenv.core.models import Action, Observation, State
+from openenv.core import Action, Observation, State
 
 # ─── Internal Dataclasses ────────────────────────────────────────────────────
 
@@ -57,6 +57,7 @@ class RoundState:
     is_terminal: bool = False
     round_score: float = 0.0
     tools_budget_used: int = 0
+    oversight_flags: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -144,3 +145,6 @@ class GeoGuessFullState(State):
     round_history: List[Dict[str, Any]] = []
     training_mode: bool = False
     episode: int = 0
+    # Oversight agent flags for the current round
+    oversight_flags: List[str] = []
+    oversight_summary: Dict[str, Any] = {}

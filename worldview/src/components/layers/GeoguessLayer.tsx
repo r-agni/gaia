@@ -13,13 +13,11 @@ import {
   Cartesian3,
   Color,
   NearFarScalar,
-  BillboardCollection,
   LabelCollection,
   PointPrimitiveCollection,
   PolylineCollection,
   BlendOption,
   VerticalOrigin,
-  HorizontalOrigin,
   Cartesian2 as CesiumCartesian2,
   LabelStyle,
 } from 'cesium';

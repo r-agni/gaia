@@ -10,8 +10,9 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from openenv.core.environment import Environment
-from openenv.core.models import EnvironmentMetadata, StepResult
+from openenv.core import Environment
+from openenv.core.env_server.types import EnvironmentMetadata
+from openenv.core.client_types import StepResult
 
 from .engine import GeoGuessEngine
 from .models import (

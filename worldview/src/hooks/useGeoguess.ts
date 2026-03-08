@@ -51,6 +51,16 @@ export interface GeoGuessState {
   round_history: RoundSummary[];
   training_mode?: boolean;
   episode?: number;
+  // Oversight agent
+  oversight_flags: string[];
+  oversight_summary?: {
+    total_flags: number;
+    assessment: 'CLEAN' | 'CAUTION' | 'UNRELIABLE';
+    most_common_issue: string | null;
+    issue_counts?: Record<string, number>;
+    rounds_with_issues?: number;
+    detail?: string;
+  };
 }
 
 const RECONNECT_DELAY = 3000;
@@ -86,7 +96,14 @@ export function useGeoguess(enabled: boolean): {
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type === 'state_update' || msg.type === 'episode_start' || msg.type === 'round_end' || msg.type === 'episode_end' || msg.type === 'round_start') {
+        if (
+          msg.type === 'state_update' ||
+          msg.type === 'episode_start' ||
+          msg.type === 'round_end' ||
+          msg.type === 'episode_end' ||
+          msg.type === 'round_start' ||
+          msg.type === 'oversight_flag'
+        ) {
           const { type: _t, ...rest } = msg;
           setState(rest as GeoGuessState);
         }

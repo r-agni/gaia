@@ -1,19 +1,19 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Viewer as CesiumViewer, Cartesian3, Math as CesiumMath } from 'cesium';
 import GlobeViewer from './components/globe/GlobeViewer';
-import BattlefieldLayer from './components/layers/BattlefieldLayer';
+import GeoguessLayer from './components/layers/GeoguessLayer';
 import OperationsPanel from './components/ui/OperationsPanel';
 import StatusBar from './components/ui/StatusBar';
-import IntelFeed from './components/ui/IntelFeed';
+import GeoSidebar from './components/ui/GeoSidebar';
 import AudioToggle from './components/ui/AudioToggle';
 import Crosshair from './components/ui/Crosshair';
 import SplashScreen from './components/ui/SplashScreen';
-import BattlefieldStatsPanel from './components/ui/BattlefieldStatsPanel';
-import { useBattlefield } from './hooks/useBattlefield';
+import GeoguessStatsPanel from './components/ui/GeoguessStatsPanel';
+import FilmGrain from './components/ui/FilmGrain';
+import { useGeoguess } from './hooks/useGeoguess';
 import { useIsMobile } from './hooks/useIsMobile';
 import { useAudio } from './hooks/useAudio';
 import type { ShaderMode } from './shaders/postprocess';
-import type { IntelFeedItem } from './components/ui/IntelFeed';
 
 function App() {
   const isMobile = useIsMobile();
@@ -22,115 +22,88 @@ function App() {
 
   const [booted, setBooted] = useState(false);
   const [shaderMode, setShaderMode] = useState<ShaderMode>('none');
-
-  const [viewerReady, setViewerReady] = useState(false);
-
-  const [battlefieldScenario, setBattlefieldScenario] = useState('crossing_at_korzha');
-  const [battlefieldAutoPlaying, setBattlefieldAutoPlaying] = useState(false);
-  const [battlefieldError, setBattlefieldError] = useState<string | null>(null);
-
+  const [mapTiles, setMapTiles] = useState<'google' | 'osm'>('google');
   const [camera, setCamera] = useState({
-    latitude: 48.5,
-    longitude: 22.2,
-    altitude: 50000,
+    latitude: 0,
+    longitude: 0,
+    altitude: 15_000_000,
     heading: 0,
-    pitch: -45,
+    pitch: -90,
   });
 
-  const {
-    state: battlefieldState,
-    feedItems: battlefieldFeedItems,
-    isConnected: battlefieldConnected,
-    connect: battlefieldConnect,
-    disconnect: battlefieldDisconnect,
-  } = useBattlefield(true);
+  // GeoGuess state — always connected (this is the whole point of the app)
+  const { state: geoState, connected: geoConnected } = useGeoguess(true);
+
+  // Auto-fly to the agent's current guess location as it updates
+  const lastGuessRef = useRef<{ lat: number; lon: number } | null>(null);
+  useEffect(() => {
+    if (!geoState?.current_guess_lat || !geoState?.current_guess_lon) return;
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed()) return;
+
+    const { current_guess_lat: lat, current_guess_lon: lon } = geoState;
+
+    // Only fly if the guess has actually changed
+    const prev = lastGuessRef.current;
+    if (prev && Math.abs(prev.lat - lat) < 0.0001 && Math.abs(prev.lon - lon) < 0.0001) return;
+    lastGuessRef.current = { lat, lon };
+
+    viewer.trackedEntity = undefined;
+    viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(lon, lat, 400_000),
+      orientation: {
+        heading: CesiumMath.toRadians(0),
+        pitch: CesiumMath.toRadians(-45),
+        roll: 0,
+      },
+      duration: 2.5,
+    });
+  }, [geoState?.current_guess_lat, geoState?.current_guess_lon]);
+
+  // When secret location is revealed (round ends), fly to actual location
+  const lastSecretRef = useRef<{ lat: number; lon: number } | null>(null);
+  useEffect(() => {
+    if (!geoState?.secret_lat || !geoState?.secret_lon) return;
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed()) return;
+
+    const { secret_lat: lat, secret_lon: lon } = geoState;
+    const prev = lastSecretRef.current;
+    if (prev && Math.abs(prev.lat - lat) < 0.0001 && Math.abs(prev.lon - lon) < 0.0001) return;
+    lastSecretRef.current = { lat, lon };
+
+    viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(lon, lat, 200_000),
+      orientation: {
+        heading: CesiumMath.toRadians(0),
+        pitch: CesiumMath.toRadians(-60),
+        roll: 0,
+      },
+      duration: 2,
+    });
+  }, [geoState?.secret_lat, geoState?.secret_lon]);
 
   const handleViewerReady = useCallback((viewer: CesiumViewer) => {
     viewerRef.current = viewer;
-    setViewerReady(true);
   }, []);
 
-  // Auto-connect to battlefield on boot
-  const hasAutoConnected = useRef(false);
-  useEffect(() => {
-    if (booted && !hasAutoConnected.current) {
-      hasAutoConnected.current = true;
-      battlefieldConnect();
-    }
-  }, [booted, battlefieldConnect]);
-
-  // Fly to battlefield when first state arrives or when a new episode starts (e.g. Run Sim).
-  // Also re-runs when viewerReady flips, in case state arrived before the viewer was initialised.
-  const hasFlewToBattlefield = useRef(false);
-  useEffect(() => {
-    if (!battlefieldState) return;
+  const handleResetView = useCallback(() => {
     const viewer = viewerRef.current;
     if (!viewer || viewer.isDestroyed()) return;
-    const isNewEpisode = battlefieldState.tick === 0;
-    if (!hasFlewToBattlefield.current || isNewEpisode) {
-      hasFlewToBattlefield.current = true;
-      const anchor = battlefieldState.geo_anchor;
-      const lon = (anchor && anchor.lon0 != null) ? anchor.lon0 : 22.2;
-      const lat = (anchor && anchor.lat0 != null) ? anchor.lat0 : 48.5;
-      viewer.trackedEntity = undefined;
-      viewer.camera.flyTo({
-        destination: Cartesian3.fromDegrees(lon, lat, 12_000),
-        orientation: {
-          heading: CesiumMath.toRadians(0),
-          pitch: CesiumMath.toRadians(-60),
-          roll: 0,
-        },
-        duration: 2,
-      });
-      // requestRenderMode: make sure the frame actually draws after flying
-      if (!viewer.isDestroyed()) viewer.scene.requestRender();
-    }
-  }, [battlefieldState, viewerReady]); // viewerReady in deps so we retry if viewer wasn't ready
-
-  // Auto-play handlers
-  const handleBattlefieldAutoPlayStart = useCallback(async () => {
-    setBattlefieldError(null);
-    try {
-      const res = await fetch('/api/battlefield/auto_play/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario_id: battlefieldScenario, tick_delay_ms: 800 }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setBattlefieldError(body?.error ?? `Server error ${res.status}`);
-        return;
-      }
-      setBattlefieldAutoPlaying(true);
-    } catch (err) {
-      setBattlefieldError('Backend unavailable — ensure the battlefield service is running.');
-    }
-  }, [battlefieldScenario]);
-
-  const handleBattlefieldAutoPlayStop = useCallback(async () => {
-    try {
-      await fetch('/api/battlefield/auto_play/stop', { method: 'POST' });
-      setBattlefieldAutoPlaying(false);
-      setBattlefieldError(null);
-    } catch { /* ignore */ }
+    viewer.trackedEntity = undefined;
+    viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(0, 20, 20_000_000),
+      orientation: {
+        heading: CesiumMath.toRadians(0),
+        pitch: CesiumMath.toRadians(-90),
+        roll: 0,
+      },
+      duration: 2,
+    });
   }, []);
 
-  const allFeedItems = useMemo<IntelFeedItem[]>(
-    () => [...battlefieldFeedItems],
-    [battlefieldFeedItems]
-  );
-
-  const onShaderChange = useCallback((mode: ShaderMode) => {
-    audio.play('shaderSwitch');
-    setShaderMode(mode);
-  }, [audio]);
-
-  const cameraThrottleRef = useRef(0);
   const handleCameraChange = useCallback(
     (lat: number, lon: number, alt: number, heading: number, pitch: number) => {
-      const now = Date.now();
-      if (now - cameraThrottleRef.current < 150) return;
-      cameraThrottleRef.current = now;
       setCamera({ latitude: lat, longitude: lon, altitude: alt, heading, pitch });
     },
     []
@@ -142,53 +115,87 @@ function App() {
     setBooted(true);
   }, [audio]);
 
+  const [startGameLoading, setStartGameLoading] = useState(false);
+  const [startGameError, setStartGameError] = useState<string | null>(null);
+
+  const handleStartGame = useCallback(async () => {
+    setStartGameError(null);
+    setStartGameLoading(true);
+    try {
+      const r = await fetch('/api/geoguess/run_game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_llm: false, step_delay_ms: 400 }),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        let msg = 'Could not start game.';
+        try {
+          const j = JSON.parse(text);
+          if (j.error) msg = j.error;
+          if (j.detail) msg += ` ${j.detail}`;
+        } catch {
+          if (text) msg = text.slice(0, 120);
+        }
+        setStartGameError(msg);
+      }
+    } catch (e) {
+      setStartGameError('Network error. Start the worldview server (port 3001) and GeoGuess server (port 8002).');
+    } finally {
+      setStartGameLoading(false);
+    }
+  }, []);
+
   if (!booted) {
     return <SplashScreen onComplete={handleBootComplete} audio={audio} />;
   }
 
   return (
-    <div className="w-screen h-screen overflow-hidden" style={{ background: '#0f1117' }}>
+    <div className="w-screen h-screen bg-wv-black overflow-hidden">
+      <FilmGrain opacity={0.04} />
+
       <GlobeViewer
         shaderMode={shaderMode}
-        mapTiles="google"
+        mapTiles={mapTiles}
         onCameraChange={handleCameraChange}
-        onTrackEntity={() => {}}
         onViewerReady={handleViewerReady}
       >
-        <BattlefieldLayer
-          state={battlefieldState}
-          visible={true}
-          isTracking={false}
-        />
+        <GeoguessLayer state={geoState} visible={true} />
       </GlobeViewer>
 
       <Crosshair />
+
       <OperationsPanel
         shaderMode={shaderMode}
-        onShaderChange={onShaderChange}
+        onShaderChange={(mode) => { audio.play('shaderSwitch'); setShaderMode(mode); }}
+        mapTiles={mapTiles}
+        onMapTilesChange={(t) => { audio.play('click'); setMapTiles(t); }}
+        onResetView={() => { audio.play('click'); handleResetView(); }}
+        onStartGame={() => { audio.play('click'); handleStartGame(); }}
+        startGameLoading={startGameLoading}
+        startGameError={startGameError}
+        onClearStartError={() => setStartGameError(null)}
         isMobile={isMobile}
-        battlefieldConnected={battlefieldConnected}
-        battlefieldScenario={battlefieldScenario}
-        onBattlefieldScenarioChange={setBattlefieldScenario}
-        onBattlefieldConnect={battlefieldConnect}
-        onBattlefieldDisconnect={battlefieldDisconnect}
-        battlefieldTick={battlefieldState?.tick}
-        battlefieldMaxTicks={battlefieldState?.max_ticks}
-        battlefieldWinner={battlefieldState?.winner}
-        battlefieldAutoPlaying={battlefieldAutoPlaying}
-        onBattlefieldAutoPlayStart={handleBattlefieldAutoPlayStart}
-        onBattlefieldAutoPlayStop={handleBattlefieldAutoPlayStop}
-        battlefieldError={battlefieldError}
+        geoConnected={geoConnected}
       />
-      <BattlefieldStatsPanel state={battlefieldState} visible={true} />
-      <IntelFeed items={allFeedItems} isMobile={isMobile} />
+
+      <GeoSidebar state={geoState} connected={geoConnected} isMobile={isMobile} />
+
+      <GeoguessStatsPanel state={geoState} visible={true} />
+
       <StatusBar
         camera={camera}
         shaderMode={shaderMode}
         isMobile={isMobile}
-        battlefieldTick={battlefieldState?.tick}
-        battlefieldUnits={battlefieldState?.units.length}
+        dataStatus={{
+          flights: 0,
+          satellites: 0,
+          earthquakes: 0,
+          cctv: 0,
+          ships: 0,
+        }}
       />
+
       <AudioToggle muted={audio.muted} onToggle={audio.toggleMute} isMobile={isMobile} />
     </div>
   );

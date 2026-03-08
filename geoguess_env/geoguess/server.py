@@ -111,11 +111,18 @@ class _BroadcastingGeoGuessEnvironment(GeoGuessEnvironment):
         global _engine
         result = super().step(action, **kwargs)
         _engine = self._engine
+        state_dict = _serialize_full_state()
+
+        # Emit a dedicated oversight_flag event when new flags are raised
+        msg_type = "state_update"
+        if state_dict.get("oversight_flags"):
+            msg_type = "oversight_flag"
+
         _schedule_broadcast({
-            "type": "state_update",
+            "type": msg_type,
             "episode": _training_episode,
             "training_mode": True,
-            **_serialize_full_state(),
+            **state_dict,
         })
         return result
 
@@ -148,6 +155,17 @@ async def training_status():
     }
 
 
+@app.get("/oversight/summary")
+async def oversight_summary():
+    """Return the oversight agent's current episode summary."""
+    state_dict = _serialize_full_state()
+    return {
+        "episode": _training_episode,
+        "oversight_summary": state_dict.get("oversight_summary", {}),
+        "current_round_flags": state_dict.get("oversight_flags", []),
+    }
+
+
 class RunGameRequest(BaseModel):
     dataset_id: str = "world_cities_5k"
     total_rounds: int = 5
@@ -158,8 +176,8 @@ class RunGameRequest(BaseModel):
     use_llm: bool = False
 
 
-@app.post("/run_game")
-async def run_game(req: RunGameRequest):
+async def _run_game_impl(req: RunGameRequest):
+    """Run one game to completion; broadcasts state via WebSocket. Used by POST /run_game and auto_play."""
     global _engine
     from .agents.rule_agent import GeoGuessRuleAgent
     agent: GeoGuessRuleAgent
@@ -197,6 +215,8 @@ async def run_game(req: RunGameRequest):
 
         if obs.done or reward > 0:
             await _broadcast({"type": "round_end", "reward": reward, **state_dict})
+        elif state_dict.get("oversight_flags"):
+            await _broadcast({"type": "oversight_flag", **state_dict})
         else:
             await _broadcast({"type": "state_update", **state_dict})
 
@@ -208,11 +228,12 @@ async def run_game(req: RunGameRequest):
 
     await _broadcast({"type": "episode_end", **engine.get_full_state_dict()})
 
-    return {
-        "episode_score": engine.state.episode_score if engine.state else 0.0,
-        "rounds": len(round_scores),
-        "round_scores": round_scores,
-    }
+
+@app.post("/run_game")
+async def run_game(req: RunGameRequest):
+    """Start a game in the background; returns immediately. State streams via WebSocket."""
+    asyncio.create_task(_run_game_impl(req))
+    return {"status": "started"}
 
 
 @app.post("/auto_play/start")
@@ -222,7 +243,7 @@ async def auto_play_start(req: RunGameRequest):
     async def _loop():
         seed = req.seed
         while True:
-            await run_game(RunGameRequest(
+            await _run_game_impl(RunGameRequest(
                 dataset_id=req.dataset_id,
                 total_rounds=req.total_rounds,
                 max_steps_per_round=req.max_steps_per_round,

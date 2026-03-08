@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from openenv.core.env_client import EnvClient
-from openenv.core.models import StepResult
+from openenv.core.client_types import StepResult
 
 from geoguess.models import GeoGuessAction, GeoGuessFullState, GeoGuessObservation
 

@@ -26,6 +26,16 @@ from .models import (
 from .rewards import check_country_region, compute_episode_reward, compute_round_reward
 from .tools import resolve_tool
 
+# Import oversight agent (lives in agents/ directory alongside llm_agent etc.)
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from agents.oversight_agent import OversightAgent as _OversightAgent
+    _oversight = _OversightAgent()
+except Exception:
+    _oversight = None
+
 
 class GeoGuessEngine:
     """
@@ -137,11 +147,13 @@ class GeoGuessEngine:
             guess_lat = max(-90.0, min(90.0, float(action.guess_lat or 0.0)))
             guess_lon = max(-180.0, min(180.0, float(action.guess_lon or 0.0)))
 
+            tool_names_used = [tr.tool_name for tr in round_state.tool_results]
             reward, dist_km = compute_round_reward(
                 guess_lat=guess_lat,
                 guess_lon=guess_lon,
                 secret_location=round_state.location,
                 tools_used=round_state.tools_budget_used,
+                tool_names_used=tool_names_used,
             )
             correct_country, correct_region = check_country_region(
                 guess_lat, guess_lon, round_state.location
@@ -159,6 +171,28 @@ class GeoGuessEngine:
             )
             round_state.guesses.append(record)
             round_state.step += 1
+
+            # ── Oversight evaluation ──────────────────────────────────────────
+            if _oversight is not None:
+                try:
+                    tool_calls_for_oversight = [
+                        {"tool_name": tr.tool_name, "result": tr.result_text}
+                        for tr in round_state.tool_results
+                    ]
+                    prior_guesses = [
+                        {"lat": g.lat, "lon": g.lon}
+                        for g in round_state.guesses[:-1]  # exclude the just-added guess
+                    ]
+                    flags = _oversight.evaluate(
+                        tool_calls=tool_calls_for_oversight,
+                        guess_reasoning=action.reasoning or "",
+                        guess_lat=guess_lat,
+                        guess_lon=guess_lon,
+                        prior_guesses=prior_guesses,
+                    )
+                    round_state.oversight_flags.extend(flags)
+                except Exception:
+                    pass
 
             round_over = (
                 len(round_state.guesses) >= s.max_guesses_per_round
@@ -338,6 +372,15 @@ class GeoGuessEngine:
                 "secret_region": r.location.region,
             })
 
+        # Oversight summary across all completed rounds
+        all_round_flags = [r.oversight_flags for r in s.rounds[: s.current_round + 1]]
+        oversight_summary = {}
+        if _oversight is not None:
+            try:
+                oversight_summary = _oversight.summarize(all_round_flags)
+            except Exception:
+                pass
+
         return {
             "episode_id": s.episode_id,
             "current_round": s.current_round,
@@ -355,4 +398,6 @@ class GeoGuessEngine:
             "round_history": round_history,
             "training_mode": s.training_mode,
             "episode": s.training_episode,
+            "oversight_flags": round_state.oversight_flags if round_state else [],
+            "oversight_summary": oversight_summary,
         }

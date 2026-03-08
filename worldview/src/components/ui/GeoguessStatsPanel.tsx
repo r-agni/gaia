@@ -1,7 +1,6 @@
 /**
  * GeoguessStatsPanel — bottom-centre overlay showing GeoGuessr game status.
  */
-import { useMemo } from 'react';
 import type { GeoGuessState } from '../../hooks/useGeoguess';
 
 const ACCENT = '#67E8F9';

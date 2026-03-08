@@ -130,7 +130,8 @@ def balance_sample(cities: list[dict], n: int, seed: int = 42) -> list[dict]:
         chosen.extend(pool[:per_continent])
     # fill remainder
     remainder = n - len(chosen)
-    all_rest = [c for c in cities if c not in set(id(x) for x in chosen)]
+    chosen_ids = {c["geonameid"] for c in chosen}
+    all_rest = [c for c in cities if c["geonameid"] not in chosen_ids]
     rng.shuffle(all_rest)
     chosen.extend(all_rest[:remainder])
     rng.shuffle(chosen)
@@ -141,7 +142,7 @@ def write_jsonl(path: Path, records: list[dict]) -> None:
     with open(path, "w") as f:
         for r in records:
             f.write(json.dumps(r) + "\n")
-    print(f"  Written {len(records)} records → {path}")
+    print(f"  Written {len(records)} records -> {path}")
 
 
 def main():

@@ -2,8 +2,8 @@
 GeoGuessr reward functions.
 
 Primary reward: Haversine distance-based exponential decay (GeoGuessr-style).
-Bonuses: correct country (+0.10), correct region (+0.05).
-Penalty: -0.02 per tool call used (encourages efficiency).
+Bonuses: correct country (+0.10), correct region (+0.05), reasoning depth (up to +0.10).
+Penalty: -0.02 per tool call used (encourages efficiency, offset by depth bonus for diverse use).
 """
 from __future__ import annotations
 
@@ -58,11 +58,31 @@ def _reverse_geocode(lat: float, lon: float) -> tuple[str, str]:
     return "", ""
 
 
+def reasoning_depth_reward(tool_names_used: List[str]) -> float:
+    """
+    Bonus reward for using multiple distinct tool categories before guessing.
+
+    Encourages the agent to build a richer internal world model rather than
+    guessing immediately. Rewards longer, more thorough investigation chains.
+
+    Reference points:
+      0–1 distinct tools → 0.000
+      2 distinct tools   → 0.025
+      3 distinct tools   → 0.050
+      4+ distinct tools  → 0.100 (capped)
+    """
+    distinct = len(set(tool_names_used))
+    if distinct <= 1:
+        return 0.0
+    return min(0.10, distinct * 0.025)
+
+
 def compute_round_reward(
     guess_lat: float,
     guess_lon: float,
     secret_location: GeoLocation,
     tools_used: int,
+    tool_names_used: Optional[List[str]] = None,
 ) -> tuple[float, float]:
     """
     Compute normalized reward and distance for a single guess.
@@ -81,9 +101,13 @@ def compute_round_reward(
         if guessed_region and guessed_region.lower() == secret_location.region.lower():
             bonus += 0.05
 
+    # Reasoning depth bonus: reward using diverse tools (world-modeling behavior)
+    depth_bonus = reasoning_depth_reward(tool_names_used or [])
+
+    # Tool penalty is halved when the agent used diverse tools (net positive for thorough investigation)
     tool_penalty = tools_used * 0.02
 
-    total = base + bonus - tool_penalty
+    total = base + bonus + depth_bonus - tool_penalty
     total = max(0.0, min(1.0, total))
 
     return round(total, 6), round(dist_km, 2)
