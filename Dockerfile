@@ -22,7 +22,7 @@ ARG INSTALL_TRAINING=false
 
 WORKDIR /home/user/app
 
-# GeoGuess env (Python FastAPI) — install as root so pip can write to system dirs
+# GeoGuess env (Python FastAPI)
 COPY --chown=user geoguess_env/pyproject.toml /home/user/app/geoguess_env/
 COPY --chown=user geoguess_env/geoguess /home/user/app/geoguess_env/geoguess
 COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
