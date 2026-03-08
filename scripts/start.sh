@@ -19,11 +19,20 @@ vllm_ready() {
 write_training_status() {
   state="$1"
   message="$2"
+  message="$(printf "%s" "$message" | tr '\n\r' ' ' | tr '"' "'")"
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   printf '{"state":"%s","message":"%s","timestamp":"%s","run_grpo_training":"%s","base_model":"%s","output_dir":"%s","log_file":"%s","vllm_log_file":"%s"}\n' \
     "$state" "$message" "$ts" "${RUN_GRPO_TRAINING:-false}" "${BASE_MODEL:-}" "${OUTPUT_DIR:-}" \
     "$TRAINING_LOG_FILE" "$VLLM_LOG_FILE" > "$TRAINING_STATUS_FILE"
   echo "[TRAINING][$state] $message"
+}
+
+tail_training_log() {
+  if [ -f "$TRAINING_LOG_FILE" ]; then
+    tail -n 8 "$TRAINING_LOG_FILE" | tr '\n\r' ' ' | tr '"' "'" | cut -c1-280
+  else
+    echo "no training log file yet"
+  fi
 }
 
 # Start GeoGuess API in background (internal only)
@@ -62,6 +71,10 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       export DATASET_PATH="${DATASET_PATH:-data/training_1k.jsonl}"
       export OUTPUT_DIR="${OUTPUT_DIR:-$APP_ROOT/geoguess_env/geoguess-grpo-out}"
       mkdir -p "$(dirname "$TRAINING_LOG_FILE")" "$(dirname "$VLLM_LOG_FILE")" "$OUTPUT_DIR"
+      if [ ! -f "$APP_ROOT/geoguess_env/train_grpo.py" ]; then
+        write_training_status "failed" "Missing training script at $APP_ROOT/geoguess_env/train_grpo.py"
+        exit 0
+      fi
       write_training_status "starting_vllm" "Launching vLLM server on :8000."
       python3 -m vllm.entrypoints.openai.api_server --model "$BASE_MODEL" --host 0.0.0.0 --port 8000 >"$VLLM_LOG_FILE" 2>&1 &
       VLLM_PID=$!
@@ -75,12 +88,12 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
         if vllm_ready; then
           VLLM_READY=true
           write_training_status "running_trainer" "vLLM is healthy; starting train_grpo.py."
-          cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 train_grpo.py >>"$TRAINING_LOG_FILE" 2>&1
+          cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 "$APP_ROOT/geoguess_env/train_grpo.py" >>"$TRAINING_LOG_FILE" 2>&1
           TRAIN_EXIT=$?
           if [ "$TRAIN_EXIT" -eq 0 ]; then
             write_training_status "completed" "GRPO training completed successfully."
           else
-            write_training_status "failed" "GRPO trainer exited with code $TRAIN_EXIT."
+            write_training_status "failed" "GRPO trainer exited with code $TRAIN_EXIT. Log tail: $(tail_training_log)"
           fi
           break
         fi
@@ -90,12 +103,12 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
         if [ "$ALLOW_TRAINING_FALLBACK_NO_VLLM" = "true" ]; then
           write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false."
           export USE_VLLM=false
-          cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 train_grpo.py >>"$TRAINING_LOG_FILE" 2>&1
+          cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 "$APP_ROOT/geoguess_env/train_grpo.py" >>"$TRAINING_LOG_FILE" 2>&1
           TRAIN_EXIT=$?
           if [ "$TRAIN_EXIT" -eq 0 ]; then
             write_training_status "completed" "GRPO training completed in fallback mode (no vLLM)."
           else
-            write_training_status "failed" "Fallback trainer exited with code $TRAIN_EXIT."
+            write_training_status "failed" "Fallback trainer exited with code $TRAIN_EXIT. Log tail: $(tail_training_log)"
           fi
         else
           write_training_status "failed" "vLLM did not become healthy in time (see vLLM log)."
