@@ -108,6 +108,11 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       done
       if [ "$VLLM_READY" != "true" ]; then
         if [ "$ALLOW_TRAINING_FALLBACK_NO_VLLM" = "true" ]; then
+          if ! python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1 && [ "${ALLOW_CPU_TRAINING_FALLBACK:-true}" != "true" ]; then
+            write_training_status "skipped" "vLLM unavailable and CUDA not detected; CPU fallback disabled."
+            kill "$VLLM_PID" 2>/dev/null || true
+            exit 0
+          fi
           write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false."
           export USE_VLLM=false
           cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 "$APP_ROOT/geoguess_env/train_grpo.py" >>"$TRAINING_LOG_FILE" 2>&1
