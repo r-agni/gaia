@@ -1,4 +1,12 @@
-﻿# Stage 2: runtime (Node + Python in one image)
+# Stage 1: build Worldview (React + Vite)
+FROM node:20-bookworm-slim AS worldview-build
+WORKDIR /worldview
+COPY worldview/package.json worldview/package-lock.json ./
+RUN npm ci
+COPY worldview/ ./
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
+
+# Stage 2: runtime (Node + Python in one image)
 FROM node:20-bookworm-slim AS runtime
 
 # Ensure a stable non-root user named "user".
@@ -24,10 +32,10 @@ COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
 COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 COPY --chown=user geoguess_env/train_grpo.py /home/user/app/geoguess_env/train_grpo.py
-RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents]"
+RUN cd /home/user/app/geoguess_env && pip install --no-cache-dir --break-system-packages -e ".[agents,training-lite]"
 
-# Worldview — pre-built dist committed to repo (no Vite build needed)
-COPY --chown=user worldview/dist /home/user/app/worldview/dist
+# Worldview (Node server + built static)
+COPY --chown=user --from=worldview-build /worldview/dist /home/user/app/worldview/dist
 COPY --chown=user worldview/server /home/user/app/worldview/server
 COPY --chown=user worldview/package.json worldview/package-lock.json /home/user/app/worldview/
 RUN cd /home/user/app/worldview && npm ci --omit=dev
@@ -41,6 +49,12 @@ ENV NODE_ENV=production
 ENV PORT=3001
 ENV GEOGUESS_API=http://127.0.0.1:8002
 ENV RUN_GRPO_TRAINING=true
+ENV USE_VLLM=false
+ENV ALLOW_CPU_TRAINING_FALLBACK=true
+ENV FORCE_SMALL_MODEL_ON_FALLBACK=true
+ENV BASE_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+ENV TRAIN_DATA_LIMIT=64
+ENV MAX_STEPS=48
 ENV ALLOW_HF_SPACE_TRAINING=true
 ENV HF_HUB_ENABLE_HF_TRANSFER=0
 ENV PYTHONUNBUFFERED=1

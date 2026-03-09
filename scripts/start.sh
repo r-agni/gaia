@@ -11,7 +11,7 @@ VLLM_HEALTH_SLEEP_SEC="${VLLM_HEALTH_SLEEP_SEC:-5}"
 ALLOW_TRAINING_FALLBACK_NO_VLLM="${ALLOW_TRAINING_FALLBACK_NO_VLLM:-true}"
 ALLOW_CPU_TRAINING_FALLBACK="${ALLOW_CPU_TRAINING_FALLBACK:-false}"
 FALLBACK_BASE_MODEL="${FALLBACK_BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
-RUN_GRPO_TRAINING="true"
+RUN_GRPO_TRAINING="${RUN_GRPO_TRAINING:-false}"
 export RUN_GRPO_TRAINING
 
 vllm_ready() {
@@ -39,6 +39,28 @@ tail_training_log() {
   fi
 }
 
+run_trainer_no_vllm() {
+  if ! python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1 && [ "$ALLOW_CPU_TRAINING_FALLBACK" != "true" ]; then
+    write_training_status "skipped" "USE_VLLM=false path requested but CUDA not detected; CPU fallback disabled."
+    return 0
+  fi
+  if [ "${FORCE_SMALL_MODEL_ON_FALLBACK:-true}" = "true" ] && [ "${BASE_MODEL:-}" = "Qwen/Qwen2.5-7B-Instruct" ]; then
+    export BASE_MODEL="$FALLBACK_BASE_MODEL"
+    write_training_status "running_trainer" "Starting train_grpo.py in USE_VLLM=false mode with BASE_MODEL=$BASE_MODEL."
+  else
+    write_training_status "running_trainer" "Starting train_grpo.py in USE_VLLM=false mode."
+  fi
+  export USE_VLLM=false
+  cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 "$APP_ROOT/geoguess_env/train_grpo.py" >>"$TRAINING_LOG_FILE" 2>&1
+  TRAIN_EXIT=$?
+  if [ "$TRAIN_EXIT" -eq 0 ]; then
+    write_training_status "completed" "GRPO training completed in USE_VLLM=false mode."
+  else
+    write_training_status "failed" "USE_VLLM=false trainer exited with code $TRAIN_EXIT. Log tail: $(tail_training_log)"
+  fi
+  return "$TRAIN_EXIT"
+}
+
 # Start GeoGuess API in background (internal only)
 cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" uvicorn geoguess.server:app --host 127.0.0.1 --port 8002 &
 
@@ -63,10 +85,10 @@ if [ "$AUTO_PLAY_ON_BOOT" = "true" ]; then
   ) &
 fi
 
-# Optional: auto-run GRPO training (requires INSTALL_TRAINING=true at build, RUN_GRPO_TRAINING=true at runtime, and GPU)
+# Optional: auto-run GRPO training (requires GRPO deps installed and RUN_GRPO_TRAINING=true)
 if [ "$RUN_GRPO_TRAINING" = "true" ]; then
   write_training_status "initializing" "RUN_GRPO_TRAINING=true; waiting for env and dependencies."
-  if python3 -c "from trl import GRPOConfig, GRPOTrainer; import vllm" 2>/dev/null && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
+  if python3 -c "from trl import GRPOConfig, GRPOTrainer" 2>/dev/null && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
     (
       set +e
       export BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
@@ -84,6 +106,26 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
         write_training_status "failed" "Missing training script at $APP_ROOT/geoguess_env/train_grpo.py"
         exit 0
       fi
+      FORCE_NO_VLLM=false
+      if [ "${USE_VLLM:-auto}" = "false" ]; then
+        FORCE_NO_VLLM=true
+      fi
+
+      HAS_VLLM=false
+      if python3 -c "import vllm" >/dev/null 2>&1; then
+        HAS_VLLM=true
+      fi
+
+      if [ "$FORCE_NO_VLLM" = "true" ] || [ "$HAS_VLLM" != "true" ]; then
+        if [ "$HAS_VLLM" != "true" ]; then
+          write_training_status "starting_trainer" "vLLM package not installed; using USE_VLLM=false path."
+        else
+          write_training_status "starting_trainer" "USE_VLLM=false explicitly requested."
+        fi
+        run_trainer_no_vllm
+        exit 0
+      fi
+
       write_training_status "starting_vllm" "Launching vLLM server on :8000."
       python3 -m vllm.entrypoints.openai.api_server --model "$BASE_MODEL" --host 0.0.0.0 --port 8000 >"$VLLM_LOG_FILE" 2>&1 &
       VLLM_PID=$!
@@ -110,33 +152,16 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       done
       if [ "$VLLM_READY" != "true" ]; then
         if [ "$ALLOW_TRAINING_FALLBACK_NO_VLLM" = "true" ]; then
-          if ! python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1 && [ "$ALLOW_CPU_TRAINING_FALLBACK" != "true" ]; then
-            write_training_status "skipped" "vLLM unavailable and CUDA not detected; CPU fallback disabled."
-            kill "$VLLM_PID" 2>/dev/null || true
-            exit 0
-          fi
-          if [ "${FORCE_SMALL_MODEL_ON_FALLBACK:-true}" = "true" ] && [ "${BASE_MODEL:-}" = "Qwen/Qwen2.5-7B-Instruct" ]; then
-            export BASE_MODEL="$FALLBACK_BASE_MODEL"
-            write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false with BASE_MODEL=$BASE_MODEL."
-          else
-            write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false."
-          fi
-          export USE_VLLM=false
-          cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 "$APP_ROOT/geoguess_env/train_grpo.py" >>"$TRAINING_LOG_FILE" 2>&1
-          TRAIN_EXIT=$?
-          if [ "$TRAIN_EXIT" -eq 0 ]; then
-            write_training_status "completed" "GRPO training completed in fallback mode (no vLLM)."
-          else
-            write_training_status "failed" "Fallback trainer exited with code $TRAIN_EXIT. Log tail: $(tail_training_log)"
-          fi
+          write_training_status "starting_trainer" "vLLM unavailable; switching to USE_VLLM=false path."
+          run_trainer_no_vllm
         else
           write_training_status "failed" "vLLM did not become healthy in time (see vLLM log)."
         fi
       fi
       kill "$VLLM_PID" 2>/dev/null || true
     ) &
-  elif ! python3 -c "from trl import GRPOConfig, GRPOTrainer; import vllm" 2>/dev/null; then
-    write_training_status "skipped" "Training deps incompatible (missing GRPOConfig/GRPOTrainer or vllm). Rebuild with INSTALL_TRAINING=true."
+  elif ! python3 -c "from trl import GRPOConfig, GRPOTrainer" 2>/dev/null; then
+    write_training_status "skipped" "Training deps incompatible (missing GRPOConfig/GRPOTrainer). Install .[training] or .[training-lite]."
   else
     write_training_status "skipped" "Dataset missing at geoguess_env/data/training_1k.jsonl."
   fi

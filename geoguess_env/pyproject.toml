@@ -29,6 +29,15 @@ training = [
     "numpy==1.26.4",
     "vllm==0.5.3.post1",
 ]
+training-lite = [
+    # CPU/no-vLLM profile for constrained deployments (e.g., HF Docker Spaces).
+    "trl==0.14.0",
+    "transformers==4.46.3",
+    "torch==2.3.1",
+    "datasets==2.21.0",
+    "accelerate==0.34.2",
+    "numpy==1.26.4",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

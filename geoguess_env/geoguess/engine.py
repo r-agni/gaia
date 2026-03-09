@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import random
 import uuid
+import math
 from typing import List, Optional
 
 from .locations import generate_scene_description, sample_locations
@@ -144,8 +145,8 @@ class GeoGuessEngine:
 
         # ── Guess ────────────────────────────────────────────────────────────
         if action.action_type == "guess":
-            guess_lat = max(-90.0, min(90.0, float(action.guess_lat or 0.0)))
-            guess_lon = max(-180.0, min(180.0, float(action.guess_lon or 0.0)))
+            guess_lat = self._bounded_coord(action.guess_lat, -90.0, 90.0, fallback=20.0)
+            guess_lon = self._bounded_coord(action.guess_lon, -180.0, 180.0, fallback=15.0)
 
             tool_names_used = [tr.tool_name for tr in round_state.tool_results]
             reward, dist_km = compute_round_reward(
@@ -312,6 +313,17 @@ class GeoGuessEngine:
 
         lines += ["", f"AVAILABLE TOOLS: {', '.join(AVAILABLE_TOOLS)}"]
         return "\n".join(lines)
+
+    @staticmethod
+    def _bounded_coord(value: Optional[float], lo: float, hi: float, fallback: float) -> float:
+        """Clamp coordinates and avoid collapsing missing values to (0, 0)."""
+        try:
+            coord = float(value) if value is not None else float(fallback)
+        except Exception:
+            coord = float(fallback)
+        if not math.isfinite(coord):
+            coord = float(fallback)
+        return max(lo, min(hi, coord))
 
     def get_full_state_dict(self) -> dict:
         """Serialise engine state for WebSocket broadcast."""
