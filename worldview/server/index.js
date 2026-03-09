@@ -1099,8 +1099,37 @@ app.get('/api/geoguess/training/history', async (_req, res) => {
 app.get('/api/geoguess/training/runtime_status', async (_req, res) => {
   try {
     const r = await fetch(`${GEOGUESS_API}/training/runtime_status`);
-    if (!r.ok) return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
-    res.json(await r.json());
+    if (r.ok) {
+      return res.json(await r.json());
+    }
+
+    // Backward-compatible fallback for older GeoGuess backend images.
+    if (r.status === 404) {
+      const statusRes = await fetch(`${GEOGUESS_API}/training/status`);
+      const statusJson = statusRes.ok ? await statusRes.json() : {};
+      return res.json({
+        run_grpo_training_env: RUN_GRPO_TRAINING,
+        runtime_status: {
+          status_file: null,
+          present: false,
+          state: statusJson?.training_mode ? 'running' : 'unknown',
+          message: statusJson?.training_mode
+            ? 'Training activity detected via /training/status.'
+            : 'Backend does not expose /training/runtime_status.',
+          timestamp: null,
+        },
+        hf_space_sync: {
+          enabled: false,
+          webhook_url_set: false,
+          last_attempt_ts: null,
+          last_ok: null,
+          last_status_code: null,
+          last_error: 'Backend route /training/runtime_status not available.',
+        },
+      });
+    }
+
+    return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
   } catch (err) {
     res.status(503).json({ error: 'GeoGuess env not running', detail: err.message });
   }
