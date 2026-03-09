@@ -11,6 +11,11 @@ pinned: false
 
 # GAIA: Geo-Reasoning + Oversight OpenEnv Environment
 
+## Demo Video
+
+Google Drive folder:  
+https://drive.google.com/drive/u/0/folders/1_pLZXV_S0T2hqcnL-1zmBNeWi-LlVEg7
+
 GAIA is an OpenEnv-compatible RL environment for training and evaluating agents on geospatial reasoning under uncertainty.  
 An agent must infer hidden real-world coordinates by combining multi-tool evidence (terrain, weather, sun angle, language, architecture, street-level and aerial cues), then submit latitude/longitude guesses.
 
@@ -18,6 +23,21 @@ This repo includes:
 - `geoguess_env/`: OpenEnv environment server, engine, tool providers, agents, and GRPO training script.
 - `worldview/`: real-time Cesium-based visualization and control UI.
 
+## Live Deployment Links
+
+- Demo video (Google Drive):  
+  https://drive.google.com/drive/u/0/folders/1_pLZXV_S0T2hqcnL-1zmBNeWi-LlVEg7
+- Public demo (Northflank, UI + backend proxy):  
+  https://http--gaia-app--bhzgzs6hgvmy.code.run/
+- Public WebSocket stream (proxied live state):  
+  wss://http--gaia-app--bhzgzs6hgvmy.code.run/ws/geoguess
+- Public REST examples (via Node proxy):
+  - `GET /api/geoguess/state`
+  - `POST /api/geoguess/run_game`
+  - `POST /api/geoguess/auto_play/start`
+  - `POST /api/geoguess/auto_play/stop`
+  - `GET /api/geoguess/auto_play/status`
+  - `GET /api/geoguess/training/history`
 ---
 
 ## 1. Hackathon Alignment
