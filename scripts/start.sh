@@ -47,10 +47,11 @@ tail_training_log() {
 cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" uvicorn geoguess.server:app --host 127.0.0.1 --port 8002 &
 
 # Auto-start gameplay loop once the Python server is ready (up to ~90s).
-# When GRPO training is enabled we skip autoplay by default to avoid contention.
+# Keep gameplay loop on by default so training/history keeps updating in the UI
+# even when GRPO batches are long-running. Can still be disabled explicitly.
 AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT:-true}"
 if [ "$RUN_GRPO_TRAINING" = "true" ]; then
-  AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT_WHEN_TRAINING:-false}"
+  AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT_WHEN_TRAINING:-true}"
 fi
 if [ "$AUTO_PLAY_ON_BOOT" = "true" ]; then
   (
