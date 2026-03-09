@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import traceback
 from pathlib import Path
 from typing import List
 
@@ -170,6 +171,7 @@ def reward_format_quality(prompts, completions, **kwargs) -> List[float]:
 
 
 if __name__ == "__main__":
+    import torch
     from transformers import AutoTokenizer
     from trl import GRPOConfig, GRPOTrainer
 
@@ -203,7 +205,22 @@ if __name__ == "__main__":
         logging_steps=10,
         save_steps=200,
         report_to="none",
+        bf16=False,
+        fp16=False,
     )
+    has_cuda = torch.cuda.is_available()
+    if not has_cuda:
+        # CPU fallback mode needs much smaller settings for stability.
+        use_vllm = False
+        grpo_kwargs.update(
+            per_device_train_batch_size=int(os.environ.get("CPU_BATCH_SIZE", "1")),
+            gradient_accumulation_steps=int(os.environ.get("CPU_GRAD_ACCUM", "1")),
+            max_completion_length=int(os.environ.get("CPU_MAX_COMPLETION", "256")),
+            num_generations=int(os.environ.get("CPU_NUM_GENERATIONS", "2")),
+            logging_steps=1,
+        )
+        print("No CUDA detected. Using CPU-safe GRPO settings and disabling vLLM.")
+
     if use_vllm:
         grpo_kwargs.update(
             use_vllm=True,
@@ -223,11 +240,17 @@ if __name__ == "__main__":
     )
 
     print(f"Starting GRPO training with model: {model_id}")
+    print(f"cuda_available={has_cuda}")
     print(f"use_vllm={use_vllm}")
     if use_vllm:
         print(f"vLLM server: {vllm_url}")
     print(f"GeoGuessEnv server: {os.environ.get('GEOGUESS_ENV_URL', 'ws://localhost:8001')}")
 
-    trainer.train()
-    trainer.save_model(output_dir)
-    print(f"Training complete. Model saved to {output_dir}")
+    try:
+        trainer.train()
+        trainer.save_model(output_dir)
+        print(f"Training complete. Model saved to {output_dir}")
+    except Exception:
+        print("GRPO training failed with exception:")
+        traceback.print_exc()
+        raise
