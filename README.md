@@ -11,6 +11,11 @@ pinned: false
 
 # GAIA: Geo-Reasoning + Oversight OpenEnv Environment
 
+## Demo Video
+
+Google Drive folder:  
+https://drive.google.com/drive/u/0/folders/1_pLZXV_S0T2hqcnL-1zmBNeWi-LlVEg7
+
 GAIA is an OpenEnv-compatible RL environment for training and evaluating agents on geospatial reasoning under uncertainty.  
 An agent must infer hidden real-world coordinates by combining multi-tool evidence (terrain, weather, sun angle, language, architecture, street-level and aerial cues), then submit latitude/longitude guesses.
 
@@ -20,6 +25,8 @@ This repo includes:
 
 ## Live Deployment Links
 
+- Demo video (Google Drive):  
+  https://drive.google.com/drive/u/0/folders/1_pLZXV_S0T2hqcnL-1zmBNeWi-LlVEg7
 - Public demo (Northflank, UI + backend proxy):  
   https://http--gaia-app--bhzgzs6hgvmy.code.run/
 - Public WebSocket stream (proxied live state):  
