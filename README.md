@@ -574,4 +574,4 @@ Capture reward trends from trainer logs for the demo video.
   - optional H100 for training/inference acceleration
  
 
-  * Credits: inspiration from repo: https://github.com/kevtoe/worldview
+## Credits: inspiration and based code from repo: https://github.com/kevtoe/worldview
