@@ -220,6 +220,16 @@ if __name__ == "__main__":
             logging_steps=1,
         )
         print("No CUDA detected. Using CPU-safe GRPO settings and disabling vLLM.")
+    elif not use_vllm:
+        # Non-vLLM mode is heavier; use safer defaults so rollouts complete and
+        # backend training history updates regularly during long runs.
+        grpo_kwargs.update(
+            per_device_train_batch_size=int(os.environ.get("NOVLLM_BATCH_SIZE", "1")),
+            gradient_accumulation_steps=int(os.environ.get("NOVLLM_GRAD_ACCUM", "2")),
+            max_completion_length=int(os.environ.get("NOVLLM_MAX_COMPLETION", "384")),
+            num_generations=int(os.environ.get("NOVLLM_NUM_GENERATIONS", "2")),
+        )
+        print("vLLM disabled with CUDA available. Using reduced non-vLLM GRPO settings.")
 
     if use_vllm:
         grpo_kwargs.update(
