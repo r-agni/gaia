@@ -22,10 +22,34 @@ interface TrainingHistory {
   total_episodes: number;
 }
 
+interface TrainingRuntimeStatus {
+  status_file?: string | null;
+  present?: boolean;
+  state?: string;
+  message?: string;
+  timestamp?: string | number | null;
+}
+
+interface HFSpaceSyncStatus {
+  enabled?: boolean;
+  webhook_url_set?: boolean;
+  last_attempt_ts?: number | null;
+  last_ok?: boolean | null;
+  last_status_code?: number | null;
+  last_error?: string | null;
+}
+
+interface TrainingRuntimeEnvelope {
+  run_grpo_training_env?: boolean;
+  runtime_status?: TrainingRuntimeStatus;
+  hf_space_sync?: HFSpaceSyncStatus;
+}
+
 const ACCENT = '#67E8F9';
 const GREEN = '#22C55E';
 const ORANGE = '#F97316';
 const RED = '#EF4444';
+const BLUE = '#60A5FA';
 const MUTED = '#6B7280';
 const BG = 'rgba(10,14,23,0.95)';
 const CARD_BG = 'rgba(17,24,39,0.8)';
@@ -37,7 +61,36 @@ function scoreColor(score: number): string {
   return RED;
 }
 
-function MiniLineChart({ data, width, height, color, label, formatY }: {
+function runtimeStateColor(state: string): string {
+  if (state === 'completed' || state === 'running_trainer' || state === 'running') return GREEN;
+  if (state === 'starting_vllm' || state === 'waiting_for_vllm' || state === 'initializing') return BLUE;
+  if (state === 'failed' || state === 'error') return RED;
+  if (state === 'skipped' || state === 'disabled' || state === 'unknown') return ORANGE;
+  return MUTED;
+}
+
+function formatTimestamp(input: string | number | null | undefined): string {
+  if (input === null || input === undefined || input === '') return 'n/a';
+  let date: Date;
+  if (typeof input === 'number') {
+    // Accept both unix seconds and unix milliseconds.
+    const ms = input > 10_000_000_000 ? input : input * 1000;
+    date = new Date(ms);
+  } else {
+    date = new Date(input);
+  }
+  if (Number.isNaN(date.getTime())) return String(input);
+  return date.toLocaleString();
+}
+
+function MiniLineChart({
+  data,
+  width,
+  height,
+  color,
+  label,
+  formatY,
+}: {
   data: number[];
   width: number;
   height: number;
@@ -66,7 +119,6 @@ function MiniLineChart({ data, width, height, color, label, formatY }: {
 
   const points = data.map((v, i) => `${toX(i)},${toY(v)}`).join(' ');
   const areaPoints = `${toX(0)},${pad.top + ch} ${points} ${toX(data.length - 1)},${pad.top + ch}`;
-
   const yTicks = [minY, minY + rangeY * 0.5, maxY];
 
   return (
@@ -87,13 +139,12 @@ function MiniLineChart({ data, width, height, color, label, formatY }: {
       <polygon points={areaPoints} fill={color} opacity={0.1} />
       <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
 
-      {data.length <= 50 && data.map((v, i) => (
-        <circle key={i} cx={toX(i)} cy={toY(v)} r={2.5} fill={color} opacity={0.8} />
-      ))}
+      {data.length <= 50 &&
+        data.map((v, i) => <circle key={i} cx={toX(i)} cy={toY(v)} r={2.5} fill={color} opacity={0.8} />)}
 
       {data.length > 1 && (
         <text x={pad.left + cw / 2} y={height - 4} textAnchor="middle" fill={MUTED} fontSize={8} fontFamily="monospace">
-          Episode 1 → {data.length}
+          Episode 1 -&gt; {data.length}
         </text>
       )}
     </svg>
@@ -106,20 +157,37 @@ interface Props {
 
 export default function TrainingResultsView({ onClose }: Props) {
   const [history, setHistory] = useState<TrainingHistory | null>(null);
+  const [runtime, setRuntime] = useState<TrainingRuntimeEnvelope | null>(null);
   const [error, setError] = useState<string | null>(null);
   const polling = useRef(true);
 
   const poll = useCallback(async () => {
-    try {
-      const r = await fetch('/api/geoguess/training/history');
-      if (r.ok) {
-        const data = await r.json();
+    const [historyRes, runtimeRes] = await Promise.allSettled([
+      fetch('/api/geoguess/training/history'),
+      fetch('/api/geoguess/training/runtime_status'),
+    ]);
+
+    let okCount = 0;
+
+    if (historyRes.status === 'fulfilled') {
+      if (historyRes.value.ok) {
+        const data = (await historyRes.value.json()) as TrainingHistory;
         setHistory(data);
-        setError(null);
-      } else {
-        setError('Could not fetch history');
+        okCount += 1;
       }
-    } catch {
+    }
+
+    if (runtimeRes.status === 'fulfilled') {
+      if (runtimeRes.value.ok) {
+        const data = (await runtimeRes.value.json()) as TrainingRuntimeEnvelope;
+        setRuntime(data);
+        okCount += 1;
+      }
+    }
+
+    if (okCount > 0) {
+      setError(null);
+    } else {
       setError('Server unreachable');
     }
   }, []);
@@ -127,13 +195,18 @@ export default function TrainingResultsView({ onClose }: Props) {
   useEffect(() => {
     polling.current = true;
     poll();
-    const id = setInterval(() => { if (polling.current) poll(); }, 3000);
-    return () => { polling.current = false; clearInterval(id); };
+    const id = setInterval(() => {
+      if (polling.current) poll();
+    }, 3000);
+    return () => {
+      polling.current = false;
+      clearInterval(id);
+    };
   }, [poll]);
 
   const episodes = history?.episodes ?? [];
-  const scores = episodes.map(e => e.episode_score);
-  const distances = episodes.map(e => e.avg_distance_km).filter((d): d is number => d !== null);
+  const scores = episodes.map((e) => e.episode_score);
+  const distances = episodes.map((e) => e.avg_distance_km).filter((d): d is number => d !== null);
 
   const totalEps = episodes.length;
   const avgScore = totalEps > 0 ? scores.reduce((a, b) => a + b, 0) / totalEps : 0;
@@ -141,35 +214,44 @@ export default function TrainingResultsView({ onClose }: Props) {
   const avgDist = distances.length > 0 ? distances.reduce((a, b) => a + b, 0) / distances.length : 0;
   const bestDist = distances.length > 0 ? Math.min(...distances) : 0;
 
+  const runtimeState = runtime?.runtime_status?.state ?? 'unknown';
+  const runtimeMessage = runtime?.runtime_status?.message ?? 'Runtime status unavailable.';
+  const runtimeUpdated = formatTimestamp(runtime?.runtime_status?.timestamp);
+  const hfSyncEnabled = Boolean(runtime?.hf_space_sync?.enabled);
+  const hfSyncLast = runtime?.hf_space_sync?.last_ok;
+  const hfSyncBadge = !hfSyncEnabled ? 'OFF' : hfSyncLast === true ? 'OK' : hfSyncLast === false ? 'ERROR' : 'PENDING';
+  const hfSyncColor = !hfSyncEnabled ? MUTED : hfSyncLast === true ? GREEN : hfSyncLast === false ? RED : ORANGE;
+
   const recent = episodes.slice(-20).reverse();
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      zIndex: 500,
-      background: BG,
-      overflow: 'auto',
-      fontFamily: 'monospace',
-      color: '#D1D5DB',
-    }}>
-      {/* Header bar */}
-      <div style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 24px',
-        background: 'rgba(10,14,23,0.98)',
-        borderBottom: `1px solid ${BORDER}`,
-        backdropFilter: 'blur(8px)',
-      }}>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 500,
+        background: BG,
+        overflow: 'auto',
+        fontFamily: 'monospace',
+        color: '#D1D5DB',
+      }}
+    >
+      <div
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 24px',
+          background: 'rgba(10,14,23,0.98)',
+          borderBottom: `1px solid ${BORDER}`,
+          backdropFilter: 'blur(8px)',
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: ACCENT, letterSpacing: '0.1em' }}>
-            TRAINING RESULTS
-          </span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: ACCENT, letterSpacing: '0.1em' }}>TRAINING RESULTS</span>
           {totalEps > 0 && (
             <span style={{ fontSize: 10, color: MUTED }}>
               {totalEps} episode{totalEps !== 1 ? 's' : ''} recorded
@@ -193,130 +275,154 @@ export default function TrainingResultsView({ onClose }: Props) {
         </button>
       </div>
 
-      {error && (
-        <div style={{ padding: '8px 24px', fontSize: 10, color: RED }}>{error}</div>
-      )}
+      {error && <div style={{ padding: '8px 24px', fontSize: 10, color: RED }}>{error}</div>}
 
       <div style={{ padding: '20px 24px', maxWidth: 1100, margin: '0 auto' }}>
-        {/* Stats cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+        <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 6, padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 10, letterSpacing: '0.08em', color: MUTED }}>RUNTIME STATUS</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 9, color: MUTED }}>HF SPACE SYNC</span>
+              <span style={{ fontSize: 9, color: hfSyncColor, border: `1px solid ${BORDER}`, borderRadius: 4, padding: '2px 6px' }}>{hfSyncBadge}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 99, background: runtimeStateColor(runtimeState), display: 'inline-block' }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: runtimeStateColor(runtimeState) }}>{runtimeState.toUpperCase()}</span>
+            <span style={{ fontSize: 10, color: MUTED }}>updated {runtimeUpdated}</span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: '#CBD5E1' }}>{runtimeMessage}</div>
+          <div style={{ marginTop: 8, fontSize: 9, color: MUTED }}>
+            RUN_GRPO_TRAINING={runtime?.run_grpo_training_env ? 'true' : 'false'}
+            {runtime?.runtime_status?.status_file ? ` | status_file=${runtime.runtime_status.status_file}` : ''}
+            {runtime?.hf_space_sync?.last_error ? ` | hf_error=${runtime.hf_space_sync.last_error}` : ''}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
           {[
             { label: 'EPISODES', value: totalEps.toString(), color: ACCENT },
-            { label: 'AVG SCORE', value: totalEps > 0 ? `${(avgScore * 100).toFixed(1)}%` : '—', color: scoreColor(avgScore) },
-            { label: 'BEST SCORE', value: totalEps > 0 ? `${(bestScore * 100).toFixed(1)}%` : '—', color: scoreColor(bestScore) },
-            { label: 'AVG DISTANCE', value: distances.length > 0 ? `${avgDist.toFixed(0)} km` : '—', color: ORANGE },
+            { label: 'RUN STATE', value: runtimeState.toUpperCase(), color: runtimeStateColor(runtimeState) },
+            { label: 'AVG SCORE', value: totalEps > 0 ? `${(avgScore * 100).toFixed(1)}%` : '-', color: scoreColor(avgScore) },
+            { label: 'BEST SCORE', value: totalEps > 0 ? `${(bestScore * 100).toFixed(1)}%` : '-', color: scoreColor(bestScore) },
+            { label: 'AVG DISTANCE', value: distances.length > 0 ? `${avgDist.toFixed(0)} km` : '-', color: ORANGE },
           ].map((card) => (
-            <div key={card.label} style={{
-              background: CARD_BG,
-              border: `1px solid ${BORDER}`,
-              borderRadius: 6,
-              padding: '14px 16px',
-            }}>
+            <div
+              key={card.label}
+              style={{
+                background: CARD_BG,
+                border: `1px solid ${BORDER}`,
+                borderRadius: 6,
+                padding: '14px 16px',
+              }}
+            >
               <div style={{ fontSize: 9, color: MUTED, letterSpacing: '0.1em', marginBottom: 6 }}>{card.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: card.color }}>{card.value}</div>
             </div>
           ))}
         </div>
 
-        {/* Charts */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-          <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 6, padding: 12 }}>
-            <MiniLineChart
-              data={scores}
-              width={500}
-              height={200}
-              color={GREEN}
-              label="Episode Score"
-              formatY={(v) => `${(v * 100).toFixed(0)}%`}
-            />
+          <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 6, padding: 12, overflowX: 'auto' }}>
+            <MiniLineChart data={scores} width={500} height={200} color={GREEN} label="Episode Score" formatY={(v) => `${(v * 100).toFixed(0)}%`} />
           </div>
-          <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 6, padding: 12 }}>
-            <MiniLineChart
-              data={distances}
-              width={500}
-              height={200}
-              color={ORANGE}
-              label="Avg Distance (km)"
-              formatY={(v) => `${v.toFixed(0)}`}
-            />
+          <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 6, padding: 12, overflowX: 'auto' }}>
+            <MiniLineChart data={distances} width={500} height={200} color={ORANGE} label="Avg Distance (km)" formatY={(v) => `${v.toFixed(0)}`} />
           </div>
         </div>
 
-        {/* Rolling averages */}
         {scores.length >= 5 && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-            <div style={{
-              background: CARD_BG,
-              border: `1px solid ${BORDER}`,
-              borderRadius: 6,
-              padding: '10px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
+            <div
+              style={{
+                background: CARD_BG,
+                border: `1px solid ${BORDER}`,
+                borderRadius: 6,
+                padding: '10px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <span style={{ fontSize: 9, color: MUTED, letterSpacing: '0.08em' }}>LAST 5 AVG SCORE</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: scoreColor(scores.slice(-5).reduce((a, b) => a + b, 0) / 5) }}>
-                {(scores.slice(-5).reduce((a, b) => a + b, 0) / 5 * 100).toFixed(1)}%
+                {((scores.slice(-5).reduce((a, b) => a + b, 0) / 5) * 100).toFixed(1)}%
               </span>
             </div>
-            <div style={{
-              background: CARD_BG,
-              border: `1px solid ${BORDER}`,
-              borderRadius: 6,
-              padding: '10px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
+            <div
+              style={{
+                background: CARD_BG,
+                border: `1px solid ${BORDER}`,
+                borderRadius: 6,
+                padding: '10px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <span style={{ fontSize: 9, color: MUTED, letterSpacing: '0.08em' }}>BEST DISTANCE</span>
-              <span style={{ fontSize: 14, fontWeight: 700, color: GREEN }}>
-                {bestDist > 0 ? `${bestDist.toFixed(0)} km` : '—'}
-              </span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: GREEN }}>{bestDist > 0 ? `${bestDist.toFixed(0)} km` : '-'}</span>
             </div>
           </div>
         )}
 
-        {/* Recent episodes table */}
         <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 6, overflow: 'hidden' }}>
           <div style={{ padding: '10px 16px', borderBottom: `1px solid ${BORDER}` }}>
-            <span style={{ fontSize: 10, color: MUTED, letterSpacing: '0.1em' }}>RECENT EPISODES</span>
+            <span style={{ fontSize: 10, color: MUTED, letterSpacing: '0.1em' }}>RECENT EPISODES (SO FAR)</span>
           </div>
           {recent.length === 0 ? (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: MUTED, fontSize: 11 }}>
-              No episodes completed yet. Training will start automatically on deploy.
+              No completed episodes recorded yet. If training is running, this table updates as episodes finish.
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                  {['#', 'Score', 'Avg Dist', 'Best Dist', 'Rounds', 'Locations'].map(h => (
-                    <th key={h} style={{
-                      padding: '8px 12px',
-                      textAlign: 'left',
-                      color: MUTED,
-                      fontSize: 9,
-                      fontWeight: 500,
-                      letterSpacing: '0.08em',
-                    }}>{h}</th>
+                  {['#', 'Score', 'Avg Dist', 'Best Dist', 'Rounds', 'Locations'].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: '8px 12px',
+                        textAlign: 'left',
+                        color: MUTED,
+                        fontSize: 9,
+                        fontWeight: 500,
+                        letterSpacing: '0.08em',
+                      }}
+                    >
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {recent.map((ep) => (
-                  <tr key={ep.episode_id} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                  <tr key={`${ep.episode_id}-${ep.episode_number}`} style={{ borderBottom: `1px solid ${BORDER}` }}>
                     <td style={{ padding: '7px 12px', color: ACCENT }}>{ep.episode_number}</td>
                     <td style={{ padding: '7px 12px', color: scoreColor(ep.episode_score), fontWeight: 600 }}>
                       {(ep.episode_score * 100).toFixed(1)}%
                     </td>
-                    <td style={{ padding: '7px 12px' }}>
-                      {ep.avg_distance_km !== null ? `${ep.avg_distance_km.toFixed(0)} km` : '—'}
-                    </td>
-                    <td style={{ padding: '7px 12px', color: GREEN }}>
-                      {ep.min_distance_km !== null ? `${ep.min_distance_km.toFixed(0)} km` : '—'}
-                    </td>
+                    <td style={{ padding: '7px 12px' }}>{ep.avg_distance_km !== null ? `${ep.avg_distance_km.toFixed(0)} km` : '-'}</td>
+                    <td style={{ padding: '7px 12px', color: GREEN }}>{ep.min_distance_km !== null ? `${ep.min_distance_km.toFixed(0)} km` : '-'}</td>
                     <td style={{ padding: '7px 12px' }}>{ep.total_rounds}</td>
-                    <td style={{ padding: '7px 12px', color: MUTED, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {ep.rounds.map(r => `${r.secret_country}`).join(', ')}
+                    <td
+                      style={{
+                        padding: '7px 12px',
+                        color: MUTED,
+                        maxWidth: 220,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {ep.rounds.map((r) => r.secret_country).join(', ')}
                     </td>
                   </tr>
                 ))}

@@ -78,6 +78,38 @@ def _serialize_full_state() -> dict:
     return _engine.get_full_state_dict()
 
 
+def _record_episode_history(final: dict) -> dict:
+    """Append (or refresh) one completed episode entry in history."""
+    distances = []
+    for rh in final.get("round_history", []):
+        d = rh.get("distance_km")
+        if d is not None:
+            distances.append(d)
+
+    episode_id = str(final.get("episode_id") or f"episode-{int(time.time() * 1000)}")
+    episode_entry = {
+        "episode_id": episode_id,
+        "episode_number": len(_episode_history) + 1,
+        "episode_score": final.get("episode_score", 0),
+        "total_rounds": final.get("total_rounds", 0),
+        "avg_distance_km": round(sum(distances) / len(distances), 1) if distances else None,
+        "min_distance_km": round(min(distances), 1) if distances else None,
+        "rounds": final.get("round_history", []),
+        "oversight_summary": final.get("oversight_summary", {}),
+        "timestamp": time.time(),
+    }
+
+    # Avoid duplicate writes if the same terminal episode is observed twice.
+    if _episode_history and _episode_history[-1].get("episode_id") == episode_id:
+        _episode_history[-1] = episode_entry
+        return _episode_history[-1]
+
+    _episode_history.append(episode_entry)
+    if len(_episode_history) > _MAX_HISTORY:
+        _episode_history[:] = _episode_history[-_MAX_HISTORY:]
+    return _episode_history[-1]
+
+
 def _read_training_runtime_status() -> dict:
     status = {
         "status_file": _training_status_file,
@@ -146,6 +178,18 @@ def _schedule_broadcast(msg: dict) -> None:
         pass
 
 
+def _schedule_coro(coro) -> None:
+    """Best-effort coroutine scheduling from sync contexts."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(coro)
+        else:
+            loop.run_until_complete(coro)
+    except Exception:
+        pass
+
+
 # ─── Broadcasting environment (training integration) ────────────────────────
 
 
@@ -185,6 +229,18 @@ class _BroadcastingGeoGuessEnvironment(GeoGuessEnvironment):
             "training_mode": True,
             **state_dict,
         })
+
+        # Ensure OpenEnv /ws training episodes are visible in /training/history.
+        is_done = bool(getattr(result, "done", False) or state_dict.get("is_terminal"))
+        if is_done:
+            _schedule_broadcast({
+                "type": "episode_end",
+                "episode": _training_episode,
+                "training_mode": True,
+                **state_dict,
+            })
+            episode_entry = _record_episode_history(state_dict)
+            _schedule_coro(_forward_episode_to_hf_space(episode_entry))
         return result
 
 
@@ -351,25 +407,8 @@ async def _run_game_impl(req: RunGameRequest):
 
     # Record episode in history
     final = engine.get_full_state_dict()
-    distances = []
-    for rh in final.get("round_history", []):
-        d = rh.get("distance_km")
-        if d is not None:
-            distances.append(d)
-    _episode_history.append({
-        "episode_id": final.get("episode_id", ""),
-        "episode_number": len(_episode_history) + 1,
-        "episode_score": final.get("episode_score", 0),
-        "total_rounds": final.get("total_rounds", 0),
-        "avg_distance_km": round(sum(distances) / len(distances), 1) if distances else None,
-        "min_distance_km": round(min(distances), 1) if distances else None,
-        "rounds": final.get("round_history", []),
-        "oversight_summary": final.get("oversight_summary", {}),
-        "timestamp": time.time(),
-    })
-    if len(_episode_history) > _MAX_HISTORY:
-        _episode_history[:] = _episode_history[-_MAX_HISTORY:]
-    await _forward_episode_to_hf_space(_episode_history[-1])
+    episode_entry = _record_episode_history(final)
+    await _forward_episode_to_hf_space(episode_entry)
 
 
 @app.post("/run_game")
