@@ -45,6 +45,7 @@ RUN sed -i '1s/^\xEF\xBB\xBF//' /home/user/app/start.sh \
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV GEOGUESS_API=http://127.0.0.1:8002
+ENV RUN_GRPO_TRAINING=true
 ENV PYTHONUNBUFFERED=1
 ENV HOME=/home/user
 ENV PATH=/home/user/.local/bin:$PATH

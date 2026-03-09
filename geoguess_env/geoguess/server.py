@@ -78,7 +78,7 @@ def _serialize_full_state() -> dict:
     return _engine.get_full_state_dict()
 
 
-def _record_episode_history(final: dict) -> dict:
+def _record_episode_history(final: dict, source: str = "unknown") -> dict:
     """Append (or refresh) one completed episode entry in history."""
     distances = []
     for rh in final.get("round_history", []):
@@ -90,6 +90,7 @@ def _record_episode_history(final: dict) -> dict:
     episode_entry = {
         "episode_id": episode_id,
         "episode_number": len(_episode_history) + 1,
+        "source": (source or "unknown").strip().lower(),
         "episode_score": final.get("episode_score", 0),
         "total_rounds": final.get("total_rounds", 0),
         "avg_distance_km": round(sum(distances) / len(distances), 1) if distances else None,
@@ -169,11 +170,15 @@ async def _broadcast(msg: dict) -> None:
 def _schedule_broadcast(msg: dict) -> None:
     """Fire-and-forget broadcast safe to call from synchronous contexts."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_broadcast(msg))
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    try:
+        if loop and loop.is_running():
+            loop.create_task(_broadcast(msg))
         else:
-            loop.run_until_complete(_broadcast(msg))
+            asyncio.run(_broadcast(msg))
     except Exception:
         pass
 
@@ -181,11 +186,15 @@ def _schedule_broadcast(msg: dict) -> None:
 def _schedule_coro(coro) -> None:
     """Best-effort coroutine scheduling from sync contexts."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(coro)
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    try:
+        if loop and loop.is_running():
+            loop.create_task(coro)
         else:
-            loop.run_until_complete(coro)
+            asyncio.run(coro)
     except Exception:
         pass
 
@@ -210,7 +219,7 @@ class _BroadcastingGeoGuessEnvironment(GeoGuessEnvironment):
             or prev_state.get("guesses")
         )
         if has_progress:
-            episode_entry = _record_episode_history(prev_state)
+            episode_entry = _record_episode_history(prev_state, source="grpo")
             _schedule_coro(_forward_episode_to_hf_space(episode_entry))
 
         _training_episode += 1
@@ -251,7 +260,7 @@ class _BroadcastingGeoGuessEnvironment(GeoGuessEnvironment):
                 "training_mode": True,
                 **state_dict,
             })
-            episode_entry = _record_episode_history(state_dict)
+            episode_entry = _record_episode_history(state_dict, source="grpo")
             _schedule_coro(_forward_episode_to_hf_space(episode_entry))
         return result
 
@@ -326,11 +335,25 @@ async def training_status():
 
 
 @app.get("/training/history")
-async def training_history():
+async def training_history(source: str = "all"):
     """Return accumulated episode history for the training results view."""
+    source_filter = (source or "all").strip().lower()
+    source_totals: dict[str, int] = {}
+    for ep in _episode_history:
+        key = str(ep.get("source") or "unknown").lower()
+        source_totals[key] = source_totals.get(key, 0) + 1
+
+    if source_filter == "all":
+        episodes = _episode_history
+    else:
+        episodes = [ep for ep in _episode_history if str(ep.get("source") or "unknown").lower() == source_filter]
+
     return {
-        "episodes": _episode_history,
-        "total_episodes": len(_episode_history),
+        "source": source_filter,
+        "episodes": episodes,
+        "total_episodes": len(episodes),
+        "total_all_episodes": len(_episode_history),
+        "source_totals": source_totals,
     }
 
 
@@ -365,7 +388,7 @@ class RunGameRequest(BaseModel):
     use_llm: bool = False
 
 
-async def _run_game_impl(req: RunGameRequest):
+async def _run_game_impl(req: RunGameRequest, source: str = "manual"):
     """Run one game to completion; broadcasts state via WebSocket. Used by POST /run_game and auto_play."""
     global _engine
     from agents.rule_agent import GeoGuessRuleAgent
@@ -419,14 +442,14 @@ async def _run_game_impl(req: RunGameRequest):
 
     # Record episode in history
     final = engine.get_full_state_dict()
-    episode_entry = _record_episode_history(final)
+    episode_entry = _record_episode_history(final, source=source)
     await _forward_episode_to_hf_space(episode_entry)
 
 
 @app.post("/run_game")
 async def run_game(req: RunGameRequest):
     """Start a game in the background; returns immediately. State streams via WebSocket."""
-    asyncio.create_task(_run_game_impl(req))
+    asyncio.create_task(_run_game_impl(req, source="manual"))
     return {"status": "started"}
 
 
@@ -447,7 +470,7 @@ async def auto_play_start(req: RunGameRequest):
                 step_delay_ms=req.step_delay_ms,
                 seed=seed,
                 use_llm=req.use_llm,
-            ))
+            ), source="autoplay")
             seed += 1
             await asyncio.sleep(0.5)
 
