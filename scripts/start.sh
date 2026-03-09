@@ -10,13 +10,9 @@ VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-360}"
 VLLM_HEALTH_SLEEP_SEC="${VLLM_HEALTH_SLEEP_SEC:-5}"
 ALLOW_TRAINING_FALLBACK_NO_VLLM="${ALLOW_TRAINING_FALLBACK_NO_VLLM:-true}"
 ALLOW_CPU_TRAINING_FALLBACK="${ALLOW_CPU_TRAINING_FALLBACK:-false}"
-
-# HF Spaces are typically CPU-only; default to disabling background GRPO there
-# unless explicitly overridden.
-if [ -n "${SPACE_ID:-}" ] && [ "${RUN_GRPO_TRAINING:-false}" = "true" ] && [ "${ALLOW_HF_SPACE_TRAINING:-false}" != "true" ]; then
-  echo "[TRAINING] HF Space detected; forcing RUN_GRPO_TRAINING=false (set ALLOW_HF_SPACE_TRAINING=true to override)."
-  RUN_GRPO_TRAINING=false
-fi
+FALLBACK_BASE_MODEL="${FALLBACK_BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+RUN_GRPO_TRAINING="true"
+export RUN_GRPO_TRAINING
 
 vllm_ready() {
   wget -q -O /dev/null http://127.0.0.1:8000/health 2>/dev/null && return 0
@@ -46,12 +42,11 @@ tail_training_log() {
 # Start GeoGuess API in background (internal only)
 cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" uvicorn geoguess.server:app --host 127.0.0.1 --port 8002 &
 
-# Auto-start gameplay loop once the Python server is ready (up to ~90s).
-# Keep gameplay loop on by default so training/history keeps updating in the UI
-# even when GRPO batches are long-running. Can still be disabled explicitly.
-AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT:-true}"
+# Auto-start gameplay loop only when explicitly enabled.
+# By default, keep non-GRPO gameplay off at boot; users can still start it from UI.
+AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT:-false}"
 if [ "$RUN_GRPO_TRAINING" = "true" ]; then
-  AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT_WHEN_TRAINING:-true}"
+  AUTO_PLAY_ON_BOOT="${AUTO_PLAY_ON_BOOT_WHEN_TRAINING:-false}"
 fi
 if [ "$AUTO_PLAY_ON_BOOT" = "true" ]; then
   (
@@ -79,6 +74,11 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       export VLLM_SERVER_URL="${VLLM_SERVER_URL:-http://127.0.0.1:8000}"
       export DATASET_PATH="${DATASET_PATH:-data/training_1k.jsonl}"
       export OUTPUT_DIR="${OUTPUT_DIR:-$APP_ROOT/geoguess_env/geoguess-grpo-out}"
+      export LOGGING_STEPS="${LOGGING_STEPS:-1}"
+      export NOVLLM_BATCH_SIZE="${NOVLLM_BATCH_SIZE:-1}"
+      export NOVLLM_GRAD_ACCUM="${NOVLLM_GRAD_ACCUM:-1}"
+      export NOVLLM_MAX_COMPLETION="${NOVLLM_MAX_COMPLETION:-64}"
+      export NOVLLM_NUM_GENERATIONS="${NOVLLM_NUM_GENERATIONS:-2}"
       mkdir -p "$(dirname "$TRAINING_LOG_FILE")" "$(dirname "$VLLM_LOG_FILE")" "$OUTPUT_DIR"
       if [ ! -f "$APP_ROOT/geoguess_env/train_grpo.py" ]; then
         write_training_status "failed" "Missing training script at $APP_ROOT/geoguess_env/train_grpo.py"
@@ -115,7 +115,12 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
             kill "$VLLM_PID" 2>/dev/null || true
             exit 0
           fi
-          write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false."
+          if [ "${FORCE_SMALL_MODEL_ON_FALLBACK:-true}" = "true" ] && [ "${BASE_MODEL:-}" = "Qwen/Qwen2.5-7B-Instruct" ]; then
+            export BASE_MODEL="$FALLBACK_BASE_MODEL"
+            write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false with BASE_MODEL=$BASE_MODEL."
+          else
+            write_training_status "running_trainer" "vLLM unavailable; falling back to USE_VLLM=false."
+          fi
           export USE_VLLM=false
           cd "$APP_ROOT/geoguess_env" && PYTHONPATH="$APP_ROOT/geoguess_env" python3 "$APP_ROOT/geoguess_env/train_grpo.py" >>"$TRAINING_LOG_FILE" 2>&1
           TRAIN_EXIT=$?

@@ -37,6 +37,31 @@ class GeoGuessEnvironment(
     def __init__(self) -> None:
         self._engine = GeoGuessEngine()
 
+    @staticmethod
+    def _run_coro_sync(coro):
+        """
+        Run async engine calls from sync OpenEnv handlers.
+        HTTPEnvServer can execute handlers in worker threads with no event loop.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            tmp_loop = asyncio.new_event_loop()
+            try:
+                return tmp_loop.run_until_complete(coro)
+            finally:
+                tmp_loop.close()
+
+        return loop.run_until_complete(coro)
+
     # ─── OpenEnv ABC ─────────────────────────────────────────────────────────
 
     def reset(
@@ -50,7 +75,7 @@ class GeoGuessEnvironment(
         location_id: Optional[str] = None,
         **kwargs,
     ) -> GeoGuessObservation:
-        obs = asyncio.get_event_loop().run_until_complete(
+        obs = self._run_coro_sync(
             self._engine.reset(
                 dataset_id=dataset_id,
                 total_rounds=total_rounds,
@@ -66,7 +91,7 @@ class GeoGuessEnvironment(
         return obs
 
     def step(self, action: GeoGuessAction, **kwargs) -> GeoGuessObservation:
-        obs, reward, done = asyncio.get_event_loop().run_until_complete(
+        obs, reward, done = self._run_coro_sync(
             self._engine.step(action)
         )
         obs.reward = reward

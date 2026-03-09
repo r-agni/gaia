@@ -976,8 +976,10 @@ setTimeout(refreshRouteRegistry, 5_000);
 const GEOGUESS_API = process.env.GEOGUESS_API || 'http://127.0.0.1:8002';
 const GEOGUESS_WS = GEOGUESS_API.replace(/^http/, 'ws');
 const RUN_GRPO_TRAINING = (process.env.RUN_GRPO_TRAINING || '').toLowerCase() === 'true';
+const AUTO_PLAY_FALLBACK_ON_BOOT =
+  (process.env.AUTO_PLAY_FALLBACK_ON_BOOT || 'false').toLowerCase() === 'true';
 const AUTO_PLAY_FALLBACK_WHEN_TRAINING =
-  (process.env.AUTO_PLAY_FALLBACK_WHEN_TRAINING || 'true').toLowerCase() === 'true';
+  (process.env.AUTO_PLAY_FALLBACK_WHEN_TRAINING || 'false').toLowerCase() === 'true';
 
 app.get('/api/geoguess/state', async (req, res) => {
   try {
@@ -1088,9 +1090,13 @@ app.get('/api/geoguess/auto_play/status', async (_req, res) => {
   }
 });
 
-app.get('/api/geoguess/training/history', async (_req, res) => {
+app.get('/api/geoguess/training/history', async (req, res) => {
   try {
-    const r = await fetch(`${GEOGUESS_API}/training/history`);
+    const source = typeof req.query.source === 'string' ? req.query.source.trim() : '';
+    const upstreamUrl = source
+      ? `${GEOGUESS_API}/training/history?source=${encodeURIComponent(source)}`
+      : `${GEOGUESS_API}/training/history`;
+    const r = await fetch(upstreamUrl);
     if (!r.ok) return res.status(r.status).json({ error: `GeoGuess API error ${r.status}` });
     res.json(await r.json());
   } catch (err) {
@@ -1197,6 +1203,10 @@ if (isDirectRun) {
     `);
     // Fallback: start auto_play if the shell script did not (e.g. health check failed)
     const tryStartAutoplay = async () => {
+      if (!AUTO_PLAY_FALLBACK_ON_BOOT) {
+        console.log('[GeoGuess] Node auto_play fallback disabled (set AUTO_PLAY_FALLBACK_ON_BOOT=true to enable)');
+        return true;
+      }
       if (RUN_GRPO_TRAINING && !AUTO_PLAY_FALLBACK_WHEN_TRAINING) {
         console.log('[GeoGuess] Node auto_play fallback disabled in training mode');
         return true;

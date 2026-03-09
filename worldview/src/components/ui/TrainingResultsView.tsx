@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 interface EpisodeRecord {
   episode_id: string;
   episode_number: number;
+  source?: string;
   episode_score: number;
   total_rounds: number;
   avg_distance_km: number | null;
@@ -18,8 +19,11 @@ interface EpisodeRecord {
 }
 
 interface TrainingHistory {
+  source?: string;
   episodes: EpisodeRecord[];
   total_episodes: number;
+  total_all_episodes?: number;
+  source_totals?: Record<string, number>;
 }
 
 interface TrainingRuntimeStatus {
@@ -163,7 +167,7 @@ export default function TrainingResultsView({ onClose }: Props) {
 
   const poll = useCallback(async () => {
     const [historyRes, runtimeRes] = await Promise.allSettled([
-      fetch('/api/geoguess/training/history'),
+      fetch('/api/geoguess/training/history?source=grpo'),
       fetch('/api/geoguess/training/runtime_status'),
     ]);
 
@@ -254,7 +258,7 @@ export default function TrainingResultsView({ onClose }: Props) {
           <span style={{ fontSize: 13, fontWeight: 700, color: ACCENT, letterSpacing: '0.1em' }}>TRAINING RESULTS</span>
           {totalEps > 0 && (
             <span style={{ fontSize: 10, color: MUTED }}>
-              {totalEps} episode{totalEps !== 1 ? 's' : ''} recorded
+              {totalEps} GRPO episode{totalEps !== 1 ? 's' : ''} recorded
             </span>
           )}
         </div>
@@ -308,7 +312,7 @@ export default function TrainingResultsView({ onClose }: Props) {
           }}
         >
           {[
-            { label: 'EPISODES', value: totalEps.toString(), color: ACCENT },
+            { label: 'EPISODES (GRPO)', value: totalEps.toString(), color: ACCENT },
             { label: 'RUN STATE', value: runtimeState.toUpperCase(), color: runtimeStateColor(runtimeState) },
             { label: 'AVG SCORE', value: totalEps > 0 ? `${(avgScore * 100).toFixed(1)}%` : '-', color: scoreColor(avgScore) },
             { label: 'BEST SCORE', value: totalEps > 0 ? `${(bestScore * 100).toFixed(1)}%` : '-', color: scoreColor(bestScore) },

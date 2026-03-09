@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import traceback
 from pathlib import Path
 from typing import List
@@ -16,7 +17,17 @@ from typing import List
 from datasets import Dataset
 
 
-def load_geoguess_dataset(path: str = "data/training_1k.jsonl") -> Dataset:
+def _int_env(name: str, default: int) -> int:
+    return int(os.environ.get(name, str(default)))
+
+
+def _num_generations(default: int) -> int:
+    # GRPO needs grouped generations for stable advantage normalization.
+    # Values < 2 can yield degenerate std/advantage behavior.
+    return max(_int_env("NUM_GENERATIONS", default), 2)
+
+
+def load_geoguess_dataset(path: str = "data/training_1k.jsonl", limit: int = 0) -> Dataset:
     """Load training JSONL and map rows to prompt records."""
     records = []
     with open(path, encoding="utf-8") as f:
@@ -41,6 +52,8 @@ def load_geoguess_dataset(path: str = "data/training_1k.jsonl") -> Dataset:
                     "region": d.get("region", ""),
                 }
             )
+            if limit > 0 and len(records) >= limit:
+                break
     return Dataset.from_list(records)
 
 
@@ -77,7 +90,11 @@ def _run_env_episode(completion_text: str, location_id: str | None, env_url: str
     from client.env_client import GeoGuessEnvClient
     from geoguess.models import GeoGuessAction
 
-    env = GeoGuessEnvClient(base_url=env_url)
+    env = GeoGuessEnvClient(
+        base_url=env_url,
+        connect_timeout_s=float(os.environ.get("GEOGUESS_CONNECT_TIMEOUT_S", "10")),
+        message_timeout_s=float(os.environ.get("GEOGUESS_MESSAGE_TIMEOUT_S", "20")),
+    )
     try:
         reset_kwargs = {"dataset_id": "training_1k"}
         if location_id:
@@ -148,6 +165,7 @@ def reward_from_env(prompts, completions, location_id=None, **kwargs) -> List[fl
     """
     env_url = os.environ.get("GEOGUESS_ENV_URL", "ws://localhost:8001")
     n = len(completions)
+    rollout_retries = max(int(os.environ.get("GEOGUESS_ROLLOUT_RETRIES", "1")), 0)
 
     if not isinstance(location_id, list):
         location_ids = [None] * n
@@ -157,11 +175,35 @@ def reward_from_env(prompts, completions, location_id=None, **kwargs) -> List[fl
             location_ids.extend([None] * (n - len(location_ids)))
 
     rewards: List[float] = []
+    success_count = 0
+    error_count = 0
+    started = time.time()
     for idx, completion in enumerate(completions):
-        try:
-            rewards.append(_run_env_episode(str(completion), location_ids[idx], env_url))
-        except Exception:
-            rewards.append(0.0)
+        reward = 0.0
+        done = False
+        for attempt in range(rollout_retries + 1):
+            try:
+                reward = _run_env_episode(str(completion), location_ids[idx], env_url)
+                done = True
+                success_count += 1
+                break
+            except Exception as e:
+                if attempt < rollout_retries:
+                    continue
+                error_count += 1
+                print(
+                    f"[reward_from_env] rollout_failed idx={idx} "
+                    f"location_id={location_ids[idx]!r} retries={rollout_retries} err={e}",
+                    flush=True,
+                )
+                traceback.print_exc()
+        rewards.append(reward if done else 0.0)
+    elapsed_s = time.time() - started
+    print(
+        f"[reward_from_env] completions={n} success={success_count} "
+        f"errors={error_count} elapsed_s={elapsed_s:.2f}",
+        flush=True,
+    )
     return rewards
 
 
@@ -180,13 +222,14 @@ if __name__ == "__main__":
     vllm_url = os.environ.get("VLLM_SERVER_URL", "http://localhost:8000")
     output_dir = os.environ.get("OUTPUT_DIR", "./geoguess-grpo-out")
     use_vllm = os.environ.get("USE_VLLM", "true").strip().lower() == "true"
+    data_limit = _int_env("TRAIN_DATA_LIMIT", 0)
 
     if not Path(dataset_path).exists():
         print(f"Dataset not found at {dataset_path}.")
         print("Run: python -m geoguess.scripts.build_datasets")
         raise SystemExit(1)
 
-    dataset = load_geoguess_dataset(dataset_path)
+    dataset = load_geoguess_dataset(dataset_path, limit=data_limit)
     print(f"Loaded {len(dataset)} training examples from {dataset_path}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -195,28 +238,33 @@ if __name__ == "__main__":
 
     grpo_kwargs = dict(
         output_dir=output_dir,
-        num_train_epochs=3,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
+        num_train_epochs=_int_env("TRAIN_EPOCHS", 3),
+        per_device_train_batch_size=_int_env("TRAIN_BATCH_SIZE", 2),
+        gradient_accumulation_steps=_int_env("TRAIN_GRAD_ACCUM", 8),
         learning_rate=1e-5,
-        max_completion_length=1024,
+        max_completion_length=_int_env("MAX_COMPLETION_LENGTH", 1024),
         temperature=0.8,
-        num_generations=8,
-        logging_steps=10,
-        save_steps=200,
+        num_generations=_num_generations(8),
+        logging_steps=_int_env("LOGGING_STEPS", 1),
+        save_steps=_int_env("SAVE_STEPS", 200),
         report_to="none",
         bf16=False,
         fp16=False,
     )
+    max_steps = _int_env("MAX_STEPS", 0)
+    if max_steps > 0:
+        grpo_kwargs["max_steps"] = max_steps
+        grpo_kwargs["num_train_epochs"] = 1
+
     has_cuda = torch.cuda.is_available()
     if not has_cuda:
         # CPU fallback mode needs much smaller settings for stability.
         use_vllm = False
         grpo_kwargs.update(
-            per_device_train_batch_size=int(os.environ.get("CPU_BATCH_SIZE", "1")),
-            gradient_accumulation_steps=int(os.environ.get("CPU_GRAD_ACCUM", "1")),
-            max_completion_length=int(os.environ.get("CPU_MAX_COMPLETION", "256")),
-            num_generations=int(os.environ.get("CPU_NUM_GENERATIONS", "2")),
+            per_device_train_batch_size=_int_env("CPU_BATCH_SIZE", 1),
+            gradient_accumulation_steps=_int_env("CPU_GRAD_ACCUM", 1),
+            max_completion_length=_int_env("CPU_MAX_COMPLETION", 64),
+            num_generations=max(_int_env("CPU_NUM_GENERATIONS", 2), 2),
             logging_steps=1,
         )
         print("No CUDA detected. Using CPU-safe GRPO settings and disabling vLLM.")
@@ -224,10 +272,11 @@ if __name__ == "__main__":
         # Non-vLLM mode is heavier; use safer defaults so rollouts complete and
         # backend training history updates regularly during long runs.
         grpo_kwargs.update(
-            per_device_train_batch_size=int(os.environ.get("NOVLLM_BATCH_SIZE", "1")),
-            gradient_accumulation_steps=int(os.environ.get("NOVLLM_GRAD_ACCUM", "2")),
-            max_completion_length=int(os.environ.get("NOVLLM_MAX_COMPLETION", "384")),
-            num_generations=int(os.environ.get("NOVLLM_NUM_GENERATIONS", "2")),
+            per_device_train_batch_size=_int_env("NOVLLM_BATCH_SIZE", 1),
+            gradient_accumulation_steps=_int_env("NOVLLM_GRAD_ACCUM", 1),
+            max_completion_length=_int_env("NOVLLM_MAX_COMPLETION", 64),
+            num_generations=max(_int_env("NOVLLM_NUM_GENERATIONS", 2), 2),
+            logging_steps=1,
         )
         print("vLLM disabled with CUDA available. Using reduced non-vLLM GRPO settings.")
 
@@ -252,6 +301,10 @@ if __name__ == "__main__":
     print(f"Starting GRPO training with model: {model_id}")
     print(f"cuda_available={has_cuda}")
     print(f"use_vllm={use_vllm}")
+    if data_limit > 0:
+        print(f"train_data_limit={data_limit}")
+    if max_steps > 0:
+        print(f"max_steps={max_steps}")
     if use_vllm:
         print(f"vLLM server: {vllm_url}")
     print(f"GeoGuessEnv server: {os.environ.get('GEOGUESS_ENV_URL', 'ws://localhost:8001')}")
