@@ -9,6 +9,7 @@ VLLM_LOG_FILE="${VLLM_LOG_FILE:-/tmp/gaia_vllm.log}"
 VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-360}"
 VLLM_HEALTH_SLEEP_SEC="${VLLM_HEALTH_SLEEP_SEC:-5}"
 ALLOW_TRAINING_FALLBACK_NO_VLLM="${ALLOW_TRAINING_FALLBACK_NO_VLLM:-true}"
+ALLOW_CPU_TRAINING_FALLBACK="${ALLOW_CPU_TRAINING_FALLBACK:-false}"
 
 # HF Spaces are typically CPU-only; default to disabling background GRPO there
 # unless explicitly overridden.
@@ -108,7 +109,7 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       done
       if [ "$VLLM_READY" != "true" ]; then
         if [ "$ALLOW_TRAINING_FALLBACK_NO_VLLM" = "true" ]; then
-          if ! python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1 && [ "${ALLOW_CPU_TRAINING_FALLBACK:-true}" != "true" ]; then
+          if ! python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1 && [ "$ALLOW_CPU_TRAINING_FALLBACK" != "true" ]; then
             write_training_status "skipped" "vLLM unavailable and CUDA not detected; CPU fallback disabled."
             kill "$VLLM_PID" 2>/dev/null || true
             exit 0
