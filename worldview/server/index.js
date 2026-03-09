@@ -976,6 +976,8 @@ setTimeout(refreshRouteRegistry, 5_000);
 const GEOGUESS_API = process.env.GEOGUESS_API || 'http://127.0.0.1:8002';
 const GEOGUESS_WS = GEOGUESS_API.replace(/^http/, 'ws');
 const RUN_GRPO_TRAINING = (process.env.RUN_GRPO_TRAINING || '').toLowerCase() === 'true';
+const AUTO_PLAY_FALLBACK_WHEN_TRAINING =
+  (process.env.AUTO_PLAY_FALLBACK_WHEN_TRAINING || 'true').toLowerCase() === 'true';
 
 app.get('/api/geoguess/state', async (req, res) => {
   try {
@@ -1194,10 +1196,10 @@ if (isDirectRun) {
 ╚═══════════════════════════════════════╝
     `);
     // Fallback: start auto_play if the shell script did not (e.g. health check failed)
-    setTimeout(async () => {
-      if (RUN_GRPO_TRAINING) {
-        console.log('[GeoGuess] Node auto_play fallback disabled because RUN_GRPO_TRAINING=true');
-        return;
+    const tryStartAutoplay = async () => {
+      if (RUN_GRPO_TRAINING && !AUTO_PLAY_FALLBACK_WHEN_TRAINING) {
+        console.log('[GeoGuess] Node auto_play fallback disabled in training mode');
+        return true;
       }
       try {
         const statusRes = await fetch(`${GEOGUESS_API}/auto_play/status`);
@@ -1209,11 +1211,28 @@ if (isDirectRun) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ use_llm: false, step_delay_ms: 300 }),
             });
-            if (startRes.ok) console.log('[GeoGuess] auto_play started (Node fallback)');
+            if (startRes.ok) {
+              console.log('[GeoGuess] auto_play started (Node fallback)');
+              return true;
+            }
+          } else {
+            return true;
           }
         }
       } catch (e) {
         // GeoGuess API not up yet or unreachable
+      }
+      return false;
+    };
+
+    setTimeout(async () => {
+      for (let i = 0; i < 12; i += 1) {
+        // Retry for ~3 minutes to survive slow Python startup on cold deploys.
+        // eslint-disable-next-line no-await-in-loop
+        const done = await tryStartAutoplay();
+        if (done) break;
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
       }
     }, 15_000);
   });
