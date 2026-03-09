@@ -6,8 +6,6 @@ Used by training scripts and external agents.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from openenv.core.env_client import EnvClient
 from openenv.core.client_types import StepResult
 
@@ -21,9 +19,16 @@ class GeoGuessEnvClient(
     WebSocket client for GeoGuessEnv.
 
     Usage:
-        client = GeoGuessEnvClient(base_url="ws://localhost:8001")
-        obs = client.reset(dataset_id="world_cities_5k", total_rounds=5)
-        result = client.step(GeoGuessAction(action_type="tool_call", tool_name="weather"))
+        with GeoGuessEnvClient(base_url="ws://localhost:8001") as client:
+            result = client.reset(dataset_id="world_cities_5k", total_rounds=5)
+            obs = result.observation
+            result = client.step(
+                GeoGuessAction(action_type="tool_call", tool_name="weather")
+            )
+            full_state = client.state()
+
+    Inherited OpenEnv public methods:
+        connect(), reset(...), step(action), state(), disconnect(), close()
     """
 
     def __init__(
@@ -38,12 +43,14 @@ class GeoGuessEnvClient(
             message_timeout_s=message_timeout_s,
         )
 
-    # ─── OpenEnv EnvClient abstract methods ──────────────────────────────────
+    # OpenEnv EnvClient abstract methods
 
     def _step_payload(self, action: GeoGuessAction) -> dict:
+        """Serialize a typed action into the JSON payload sent to `step`."""
         return action.model_dump()
 
     def _parse_result(self, payload: dict) -> StepResult[GeoGuessObservation]:
+        """Parse reset/step response payloads into StepResult[GeoGuessObservation]."""
         obs_data = payload.get("observation", payload)
         obs = GeoGuessObservation(**{
             k: v for k, v in obs_data.items()
@@ -55,6 +62,7 @@ class GeoGuessEnvClient(
         return StepResult(observation=obs, reward=obs.reward, done=obs.done)
 
     def _parse_state(self, payload: dict) -> GeoGuessFullState:
+        """Parse `state()` response payload into a typed full-state model."""
         return GeoGuessFullState(**{
             k: v for k, v in payload.items()
             if k in GeoGuessFullState.model_fields
