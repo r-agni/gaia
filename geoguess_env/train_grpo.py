@@ -74,23 +74,48 @@ def _parse_multi_turn(text: str):
 def _run_env_episode(completion_text: str, location_id: str | None, env_url: str) -> float:
     """Execute parsed actions against the environment and return terminal reward."""
     from client.env_client import GeoGuessEnvClient
+    from geoguess.models import GeoGuessAction
 
     env = GeoGuessEnvClient(base_url=env_url)
-    reset_kwargs = {"dataset_id": "training_1k"}
-    if location_id:
-        reset_kwargs["location_id"] = location_id
-    obs = env.reset(**reset_kwargs)
+    try:
+        reset_kwargs = {"dataset_id": "training_1k"}
+        if location_id:
+            reset_kwargs["location_id"] = location_id
+        obs = env.reset(**reset_kwargs)
 
-    reward = 0.0
-    for action in _parse_multi_turn(completion_text):
-        if obs.done:
-            break
-        result = env.step(action)
-        obs = result.observation
-        if result.done:
-            reward = float(result.reward or 0.0)
-            break
-    return reward
+        reward = 0.0
+        for action in _parse_multi_turn(completion_text):
+            if obs.done:
+                break
+            result = env.step(action)
+            obs = result.observation
+            if result.done:
+                reward = float(result.reward or 0.0)
+                break
+
+        # If the parsed completion ends before episode termination, keep
+        # advancing with cheap fallback guesses so training rollouts end and
+        # backend history/runtime views reflect ongoing GRPO activity.
+        finalize_steps = 0
+        while not obs.done and finalize_steps < 64:
+            result = env.step(
+                GeoGuessAction(
+                    action_type="guess",
+                    guess_lat=0.0,
+                    guess_lon=0.0,
+                    reasoning="auto-finalize rollout",
+                )
+            )
+            obs = result.observation
+            finalize_steps += 1
+            if result.done:
+                reward = float(result.reward or 0.0)
+                break
+
+        return reward
+    finally:
+        # Ensure the WS session is not leaked across reward calls.
+        env.close()
 
 
 def _format_reward(text: str) -> float:

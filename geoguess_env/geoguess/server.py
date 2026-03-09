@@ -201,6 +201,18 @@ class _BroadcastingGeoGuessEnvironment(GeoGuessEnvironment):
 
     def reset(self, **kwargs):
         global _engine, _training_episode
+        # If the previous rollout is being truncated by a fresh reset,
+        # persist the best available snapshot so UI history keeps moving.
+        prev_state = _serialize_full_state()
+        has_progress = bool(
+            prev_state.get("round_history")
+            or prev_state.get("tool_calls")
+            or prev_state.get("guesses")
+        )
+        if has_progress:
+            episode_entry = _record_episode_history(prev_state)
+            _schedule_coro(_forward_episode_to_hf_space(episode_entry))
+
         _training_episode += 1
         obs = super().reset(**kwargs)
         _engine = self._engine

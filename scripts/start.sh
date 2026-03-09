@@ -10,6 +10,13 @@ VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-360}"
 VLLM_HEALTH_SLEEP_SEC="${VLLM_HEALTH_SLEEP_SEC:-5}"
 ALLOW_TRAINING_FALLBACK_NO_VLLM="${ALLOW_TRAINING_FALLBACK_NO_VLLM:-true}"
 
+# HF Spaces are typically CPU-only; default to disabling background GRPO there
+# unless explicitly overridden.
+if [ -n "${SPACE_ID:-}" ] && [ "${RUN_GRPO_TRAINING:-false}" = "true" ] && [ "${ALLOW_HF_SPACE_TRAINING:-false}" != "true" ]; then
+  echo "[TRAINING] HF Space detected; forcing RUN_GRPO_TRAINING=false (set ALLOW_HF_SPACE_TRAINING=true to override)."
+  RUN_GRPO_TRAINING=false
+fi
+
 vllm_ready() {
   wget -q -O /dev/null http://127.0.0.1:8000/health 2>/dev/null && return 0
   wget -q -O /dev/null http://127.0.0.1:8000/v1/models 2>/dev/null && return 0
