@@ -349,6 +349,34 @@ Operationally:
 - Training uses OpenEnv WS (`GEOGUESS_ENV_URL=ws://...`) to reset/step/state-query episodes.
 - The Cesium demo UI uses custom REST/WS endpoints for visualization, while environment control remains OpenEnv-compliant.
 
+### GeoGuessEnvClient Method Reference (`geoguess_env/client/env_client.py`)
+
+- `connect()`
+  - Opens a persistent WebSocket session to `{base_url}/ws`. Called automatically by `reset`, `step`, or `state` if needed.
+- `reset(**kwargs) -> StepResult[GeoGuessObservation]`
+  - Sends a `reset` message and returns initial `observation`, `reward`, and `done`.
+  - In GeoGuess training this is used with args like `dataset_id`, `location_id`, and `total_rounds`.
+- `step(action) -> StepResult[GeoGuessObservation]`
+  - Sends one `GeoGuessAction` (`tool_call` or `guess`) and returns the next observation plus reward/terminal flag.
+  - `GeoGuessEnvClient._step_payload()` converts the typed action to JSON via `action.model_dump()`.
+- `state() -> GeoGuessFullState`
+  - Requests full current environment state (server truth/debug state), not just the agent observation.
+  - `GeoGuessEnvClient._parse_state()` maps JSON into `GeoGuessFullState`.
+- `disconnect()`
+  - Closes only the WebSocket session (best-effort close message).
+- `close()`
+  - Calls `disconnect()`. If the client was created from a provider (`from_env`/`from_docker_image`), it also stops the runtime/container.
+- Context manager support
+  - `with GeoGuessEnvClient(...) as client:` auto-connects on enter and closes on exit.
+
+Implementation hooks in this file:
+- `_step_payload(action)`
+  - Serialization hook used by `step`.
+- `_parse_result(payload)`
+  - Parses reset/step response payloads into `StepResult[GeoGuessObservation]` and copies `reward`, `done`, `metadata` onto the observation model.
+- `_parse_state(payload)`
+  - Parses state payloads into `GeoGuessFullState`.
+
 Why this matters:
 - We can swap agent policies while keeping environment API stable.
 - The same environment supports scripted agents, HF-inference agents, and RL rollouts without changing engine logic.
