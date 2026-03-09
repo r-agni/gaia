@@ -41,27 +41,16 @@ This repo includes:
 
 ---
 
-## 1. Hackathon Alignment
+## 1. Features 
 
-### Primary Required Problem Statement
-**Statement 1: Multi-Agent Interactions**
+**Multi-Agent Interactions**
 
 Why this fits:
 - The environment includes a **playing agent** and a separate **oversight agent**.
 - The oversight agent monitors evidence gathering and reasoning quality, flags contradictions, and produces episode-level reliability assessments.
 - This creates an explicit multi-agent dynamic: actor + evaluator in a partially observable world.
 
-### Selected Partner Sub-Themes (max 2)
-1. **Fleet AI - Scalable Oversight**
-2. **Scaler AI Labs - Multi-App RL Environment for Enterprise Workflows**
-
-Why these two:
-- Fleet AI: first-class oversight pipeline (`oversight_flags`, `oversight_summary`) is implemented and streamed live.
-- Scaler AI Labs: the environment matches Statement 3.1 world-modeling behavior with tool/API interaction, business-rule-like constraints (budgeted actions), and multi-step workflow execution.
-
-### Subcategory Fit (Concrete Mapping)
-
-**Fleet AI - Scalable Oversight**
+**Scalable Oversight**
 - Dedicated oversight agent evaluates each guess and emits structured flags:
   `LAZY_GUESS`, `CONTRADICTION`, `REPEATED_GUESS`, `THIN_REASONING`, `OVERCONFIDENT`.
 - Episode-level reliability rollup is exposed as `oversight_summary` (`CLEAN` / `CAUTION` / `UNRELIABLE`).
@@ -69,9 +58,8 @@ Why these two:
   - Engine state includes `oversight_flags` and `oversight_summary`.
   - Backend emits real-time `oversight_flag` WebSocket events.
   - UI surfaces flag panels and reliability status.
-- Why this fits Fleet AI: the system does not only act; it monitors, explains, and scores agent reliability as a parallel oversight process.
 
-**Scaler AI Labs - Multi-App RL Environment for Enterprise Workflows**
+**Multi-App RL Environment for Enterprise Workflows**
 - Multi-step workflow under hard budgets:
   agent must sequence tool calls, update beliefs, and guess within step/guess limits.
 - Multi-tool app integration:
@@ -81,10 +69,6 @@ Why these two:
 - Deployment-friendly operations:
   same backend contracts power local dev, containerized demo, and hosted runtime (Northflank / HF Spaces path).
 - Why this fits Scaler AI Labs: this is a reusable, enterprise-style RL environment with explicit workflows, guardrails, monitoring signals, and transport-stable APIs.
-
-### Secondary Technical Alignment
-**Statement 3.1: World Modeling (Professional Tasks)**  
-The agent interacts with dynamic tools/APIs and must maintain consistent internal beliefs over multiple steps.
 
 ---
 
@@ -210,7 +194,6 @@ Then episode-level summarization:
 - issue counts and dominant failure type
 
 Rationale:
-- deterministic rules are auditable and easy to demonstrate in a hackathon demo.
 - provides immediate safety/reliability observability in multi-agent settings.
 
 ### 4.4 LLM Output Robustness
@@ -442,8 +425,6 @@ Northflank specifics already captured in `DEPLOY.md`:
 ---
 
 ## 11. Hugging Face Spaces Deployment (Docker Space)
-
-Hackathon requirement references OpenEnv on HF Spaces.  
 This repo can be deployed as a **Docker Space** using the root `Dockerfile`.
 
 Practical setup:
@@ -511,7 +492,7 @@ Then open `http://localhost:3001`.
 
 ---
 
-## 14. Minimal Training Script Path (for Submission Requirement)
+## 14. Minimal Training Script Path
 
 Run from `geoguess_env/`:
 
@@ -563,22 +544,9 @@ Capture reward trends from trainer logs for the demo video.
 
 - The active environment for this project is `geoguess_env`.
 - Some files still contain legacy `battlefield` references (not part of the GeoGuess demo path).
-- For hackathon submission, use the GeoGuess/OpenEnv pipeline documented above.
 
 ---
 
-## 17. Submission Checklist (Hackathon)
-
-- OpenEnv runtime: `openenv-core>=0.2.1` is used in `geoguess_env/pyproject.toml`.
-- Demo format: prepare a 1-minute technical demo video (no slide deck).
-- Training evidence: include GRPO logs/curves showing reward improvement.
-- Partner selection to submit:
-  - Fleet AI - Scalable Oversight
-  - Scaler AI Labs - Multi-App RL Environment for Enterprise Workflows
-- Deployment:
-  - HF Spaces (Docker Space) for OpenEnv-compliant hosted demo
-  - Northflank `gaia-app` for combined UI + API runtime
-  - optional H100 for training/inference acceleration
  
 
 ## Credits: inspiration and based code from repo: https://github.com/kevtoe/worldview
