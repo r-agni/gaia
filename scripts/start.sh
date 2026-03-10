@@ -39,6 +39,13 @@ tail_training_log() {
   fi
 }
 
+check_grpo_deps() {
+  python3 - <<'PY'
+from trl import GRPOConfig, GRPOTrainer  # noqa: F401
+print("ok")
+PY
+}
+
 run_trainer_no_vllm() {
   if ! python3 -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1 && [ "$ALLOW_CPU_TRAINING_FALLBACK" != "true" ]; then
     write_training_status "skipped" "USE_VLLM=false path requested but CUDA not detected; CPU fallback disabled."
@@ -88,7 +95,9 @@ fi
 # Optional: auto-run GRPO training (requires GRPO deps installed and RUN_GRPO_TRAINING=true)
 if [ "$RUN_GRPO_TRAINING" = "true" ]; then
   write_training_status "initializing" "RUN_GRPO_TRAINING=true; waiting for env and dependencies."
-  if python3 -c "from trl import GRPOConfig, GRPOTrainer" 2>/dev/null && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
+  GRPO_CHECK_OUT="$(check_grpo_deps 2>&1)"
+  GRPO_CHECK_OK=$?
+  if [ "$GRPO_CHECK_OK" -eq 0 ] && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
     (
       set +e
       export BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
@@ -160,8 +169,9 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
       fi
       kill "$VLLM_PID" 2>/dev/null || true
     ) &
-  elif ! python3 -c "from trl import GRPOConfig, GRPOTrainer" 2>/dev/null; then
-    write_training_status "skipped" "Training deps incompatible (missing GRPOConfig/GRPOTrainer). Install .[training] or .[training-lite]."
+  elif [ "$GRPO_CHECK_OK" -ne 0 ]; then
+    GRPO_ERR="$(printf "%s" "$GRPO_CHECK_OUT" | tail -c 400)"
+    write_training_status "skipped" "Training deps incompatible (GRPO import failed). Details: $GRPO_ERR"
   else
     write_training_status "skipped" "Dataset missing at geoguess_env/data/training_1k.jsonl."
   fi
