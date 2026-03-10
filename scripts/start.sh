@@ -95,8 +95,10 @@ fi
 # Optional: auto-run GRPO training (requires GRPO deps installed and RUN_GRPO_TRAINING=true)
 if [ "$RUN_GRPO_TRAINING" = "true" ]; then
   write_training_status "initializing" "RUN_GRPO_TRAINING=true; waiting for env and dependencies."
+  set +e
   GRPO_CHECK_OUT="$(check_grpo_deps 2>&1)"
   GRPO_CHECK_OK=$?
+  set -e
   if [ "$GRPO_CHECK_OK" -eq 0 ] && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
     (
       set +e
