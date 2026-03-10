@@ -33,7 +33,14 @@ COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 COPY --chown=user geoguess_env/train_grpo.py /home/user/app/geoguess_env/train_grpo.py
 RUN cd /home/user/app/geoguess_env \
-    && pip install --no-cache-dir --break-system-packages -e ".[agents,training-lite]" \
+    && pip install --no-cache-dir --break-system-packages -e ".[agents]" \
+    && pip install --no-cache-dir --break-system-packages \
+      trl==0.14.0 \
+      transformers==4.46.3 \
+      torch==2.3.1 \
+      datasets==2.21.0 \
+      accelerate==0.34.2 \
+      numpy==1.26.4 \
     && python3 -c "from trl import GRPOConfig, GRPOTrainer; print('GRPO deps OK')"
 
 # Worldview (Node server + built static)
