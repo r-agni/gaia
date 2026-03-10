@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/user/app
+ARG HF_BUILD_STAMP=20260310-1
 
 # GeoGuess env (Python FastAPI)
 COPY --chown=user geoguess_env/pyproject.toml /home/user/app/geoguess_env/
@@ -32,6 +33,7 @@ COPY --chown=user geoguess_env/agents /home/user/app/geoguess_env/agents
 COPY --chown=user geoguess_env/client /home/user/app/geoguess_env/client
 COPY --chown=user geoguess_env/data /home/user/app/geoguess_env/data
 COPY --chown=user geoguess_env/train_grpo.py /home/user/app/geoguess_env/train_grpo.py
+RUN echo "HF_BUILD_STAMP=${HF_BUILD_STAMP}"
 RUN cd /home/user/app/geoguess_env \
     && pip install --no-cache-dir --break-system-packages -e ".[agents]" \
     && pip install --no-cache-dir --break-system-packages \
