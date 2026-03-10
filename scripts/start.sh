@@ -99,6 +99,34 @@ if [ "$RUN_GRPO_TRAINING" = "true" ]; then
   GRPO_CHECK_OUT="$(check_grpo_deps 2>&1)"
   GRPO_CHECK_OK=$?
   set -e
+
+  # HF fallback: some Docker Space rebuilds may come up without TRL installed.
+  # Attempt one runtime bootstrap install when trl import is missing.
+  if [ "$GRPO_CHECK_OK" -ne 0 ] && printf "%s" "$GRPO_CHECK_OUT" | grep -q "No module named 'trl'"; then
+    write_training_status "installing_deps" "trl not found; installing runtime training-lite dependencies."
+    set +e
+    INSTALL_OUT="$(
+      python3 -m pip install --no-cache-dir --user \
+        trl==0.14.0 \
+        transformers==4.46.3 \
+        torch==2.3.1 \
+        datasets==2.21.0 \
+        accelerate==0.34.2 \
+        numpy==1.26.4 2>&1
+    )"
+    INSTALL_OK=$?
+    set -e
+    if [ "$INSTALL_OK" -eq 0 ]; then
+      set +e
+      GRPO_CHECK_OUT="$(check_grpo_deps 2>&1)"
+      GRPO_CHECK_OK=$?
+      set -e
+    else
+      INSTALL_ERR="$(printf "%s" "$INSTALL_OUT" | tail -c 400)"
+      write_training_status "failed" "Runtime install of training deps failed. Details: $INSTALL_ERR"
+    fi
+  fi
+
   if [ "$GRPO_CHECK_OK" -eq 0 ] && [ -f "$APP_ROOT/geoguess_env/data/training_1k.jsonl" ]; then
     (
       set +e
